@@ -1,0 +1,12 @@
+node_modules/
+.env.local
+resources/
+dist/
+dist-electron/
+*.db
+.gmail-token.json
+.gmail-credentials.json
+.DS_Store
+.idea/
+.vscode/
+*.log
