@@ -5,11 +5,12 @@ import { ParticleRing } from './components/ParticleRing'
 import { HudOverlay } from './components/HudOverlay'
 import { Transcript } from './components/Transcript'
 import { Dashboard } from './components/Dashboard'
+import { ConfirmCard } from './components/ConfirmCard'
 import type { BackendEvent } from '../../backend/types'
 import './styles/global.css'
 
 export default function App(): JSX.Element {
-  const { state, handleEvent, toggleDashboard } = useAnimState()
+  const { state, handleEvent, toggleDashboard, toggleSettings } = useAnimState()
 
   const onEvent = useCallback((event: BackendEvent) => {
     handleEvent(event)
@@ -100,6 +101,14 @@ export default function App(): JSX.Element {
         onStatsClick={toggleDashboard}
       />
       <Transcript userText={state.userText} assistantText={state.assistantText} />
+      {state.confirm && (
+        <ConfirmCard
+          action={state.confirm.action}
+          detail={state.confirm.detail}
+          onConfirm={() => send({ type: 'confirm_response', id: state.confirm!.id, approved: true })}
+          onCancel={() => send({ type: 'confirm_response', id: state.confirm!.id, approved: false })}
+        />
+      )}
       <Dashboard
         open={state.dashboardOpen}
         onClose={toggleDashboard}
