@@ -7,4 +7,5 @@ contextBridge.exposeInMainWorld('jarvis', {
   onBackendPort: (cb: (port: number) => void) =>
     ipcRenderer.once('backend-port', (_e, port) => cb(port)),
   onPttStart: (cb: () => void) => { pttCallback = cb },
+  setHotkey: (accelerator: string) => ipcRenderer.send('set-hotkey', accelerator),
 })

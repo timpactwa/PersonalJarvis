@@ -7,6 +7,7 @@ import { Transcript } from './components/Transcript'
 import { Dashboard } from './components/Dashboard'
 import { ConfirmCard } from './components/ConfirmCard'
 import { AgentCards } from './components/AgentCards'
+import { SettingsPanel } from './components/SettingsPanel'
 import type { BackendEvent } from '../../backend/types'
 import './styles/global.css'
 
@@ -95,6 +96,10 @@ export default function App(): JSX.Element {
     if (state.dashboardOpen) send({ type: 'get_usage' })
   }, [state.dashboardOpen, send])
 
+  useEffect(() => {
+    if (state.settingsOpen) send({ type: 'get_settings' })
+  }, [state.settingsOpen, send])
+
   return (
     <div style={{ width: '100vw', height: '100vh', background: '#060b14', position: 'relative' }}>
       <ParticleRing state={state.anim} />
@@ -124,6 +129,13 @@ export default function App(): JSX.Element {
         daily={state.usageDaily}
         byModel={state.usageByModel}
         onOpenSettings={() => { toggleDashboard(); toggleSettings() }}
+      />
+      <SettingsPanel
+        open={state.settingsOpen}
+        settings={state.settings}
+        onClose={toggleSettings}
+        onSave={(partial) => send({ type: 'set_settings', settings: partial })}
+        onHotkeyChange={(accel) => (window as any).jarvis.setHotkey(accel)}
       />
     </div>
   )

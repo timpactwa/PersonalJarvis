@@ -1,4 +1,4 @@
-import { app, BrowserWindow, globalShortcut, utilityProcess } from 'electron'
+import { app, BrowserWindow, globalShortcut, utilityProcess, ipcMain } from 'electron'
 import { join } from 'path'
 
 let mainWindow: BrowserWindow | null = null
@@ -51,8 +51,10 @@ function createWindow(): void {
 app.whenReady().then(() => {
   createWindow()
 
-  globalShortcut.register('Alt+Space', () => {
-    mainWindow?.webContents.send('ptt-start')
+  registerHotkey('Alt+Space')
+
+  ipcMain.on('set-hotkey', (_e, accelerator: string) => {
+    registerHotkey(accelerator)
   })
 
   app.on('activate', () => {
@@ -66,3 +68,17 @@ app.on('window-all-closed', () => {
   backendProcess?.kill()
   if (process.platform !== 'darwin') app.quit()
 })
+
+function registerHotkey(accelerator: string): void {
+  globalShortcut.unregisterAll()
+  try {
+    globalShortcut.register(accelerator, () => {
+      mainWindow?.webContents.send('ptt-start')
+    })
+  } catch {
+    // Invalid accelerator — fall back to default so PTT keeps working
+    globalShortcut.register('Alt+Space', () => {
+      mainWindow?.webContents.send('ptt-start')
+    })
+  }
+}
