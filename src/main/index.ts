@@ -1,9 +1,7 @@
-import { app, BrowserWindow, globalShortcut, ipcMain } from 'electron'
+import { app, BrowserWindow } from 'electron'
 import { join } from 'path'
-import { spawn, ChildProcess } from 'child_process'
 
 let mainWindow: BrowserWindow | null = null
-let backendProcess: ChildProcess | null = null
 
 function createWindow(): void {
   mainWindow = new BrowserWindow({
@@ -21,7 +19,7 @@ function createWindow(): void {
   if (process.env.ELECTRON_RENDERER_URL) {
     mainWindow.loadURL(process.env.ELECTRON_RENDERER_URL)
   } else {
-    mainWindow.loadFile(join(__dirname, '../renderer/index.html'))
+    mainWindow.loadFile(join(__dirname, '../../dist/index.html'))
   }
 }
 
@@ -33,6 +31,5 @@ app.whenReady().then(() => {
 })
 
 app.on('window-all-closed', () => {
-  backendProcess?.kill()
   if (process.platform !== 'darwin') app.quit()
 })
