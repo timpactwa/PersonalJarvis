@@ -24,12 +24,13 @@ describe('confirmation registry', () => {
   })
 
   it('resolveConfirmation(approved=false) does not run execute', async () => {
-    const { requestConfirmation, resolveConfirmation } = await import('../../src/backend/confirm')
+    const { requestConfirmation, resolveConfirmation, hasPending } = await import('../../src/backend/confirm')
     let ran = false
     const conf = requestConfirmation('Run file', 'C:/x.bat', async () => { ran = true; return 'ok' })
     const result = await resolveConfirmation(conf.id, false)
     expect(ran).toBe(false)
     expect(result).toBeNull()
+    expect(hasPending()).toBe(false)
   })
 
   it('resolveConfirmation with unknown id returns null', async () => {
