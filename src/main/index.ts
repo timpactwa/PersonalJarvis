@@ -1,7 +1,9 @@
 import { app, BrowserWindow } from 'electron'
 import { join } from 'path'
+import { spawn, ChildProcess } from 'child_process'
 
 let mainWindow: BrowserWindow | null = null
+let backendProcess: ChildProcess | null = null
 
 function createWindow(): void {
   mainWindow = new BrowserWindow({
@@ -14,6 +16,23 @@ function createWindow(): void {
       preload: join(__dirname, '../preload/index.js'),
       sandbox: false,
     },
+  })
+
+  // Spawn backend as child process
+  backendProcess = spawn(
+    process.execPath,
+    [join(__dirname, '../backend/index.js')],
+    { env: { ...process.env, JARVIS_PORT: '0' }, stdio: ['ignore', 'pipe', 'inherit'] }
+  )
+
+  backendProcess.stdout?.on('data', (data: Buffer) => {
+    try {
+      const msg = JSON.parse(data.toString().trim())
+      if (msg.type === 'ready') {
+        process.env.JARVIS_BACKEND_PORT = String(msg.port)
+        mainWindow?.webContents.send('backend-port', msg.port)
+      }
+    } catch { /* partial line */ }
   })
 
   if (process.env.ELECTRON_RENDERER_URL) {
@@ -31,5 +50,6 @@ app.whenReady().then(() => {
 })
 
 app.on('window-all-closed', () => {
+  backendProcess?.kill()
   if (process.platform !== 'darwin') app.quit()
 })
