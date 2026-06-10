@@ -6,6 +6,7 @@ import { HudOverlay } from './components/HudOverlay'
 import { Transcript } from './components/Transcript'
 import { Dashboard } from './components/Dashboard'
 import { ConfirmCard } from './components/ConfirmCard'
+import { AgentCards } from './components/AgentCards'
 import type { BackendEvent } from '../../backend/types'
 import './styles/global.css'
 
@@ -109,6 +110,7 @@ export default function App(): JSX.Element {
           onCancel={() => send({ type: 'confirm_response', id: state.confirm!.id, approved: false })}
         />
       )}
+      <AgentCards agents={state.agents} onClose={(id) => send({ type: 'agent_close', id })} />
       <Dashboard
         open={state.dashboardOpen}
         onClose={toggleDashboard}
