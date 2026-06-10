@@ -46,4 +46,13 @@ describe('database', () => {
     expect(stats.tokens).toBe(150)
     expect(stats.cost).toBeGreaterThan(0)
   })
+
+  it('logs local ollama calls at zero cost', async () => {
+    const { initDb, logApiCall, getStatsToday } = await import('../../../src/backend/memory/db')
+    initDb()
+    logApiCall({ model: 'ollama:llama3.1:8b', inputTokens: 500, outputTokens: 500 })
+    const stats = getStatsToday()
+    expect(stats.tokens).toBe(1000)
+    expect(stats.cost).toBe(0)
+  })
 })

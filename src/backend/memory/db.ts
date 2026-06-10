@@ -49,8 +49,12 @@ const MODEL_COST: Record<string, { input: number; output: number }> = {
 }
 
 export function logApiCall(params: { model: string; inputTokens: number; outputTokens: number }): void {
-  const cost = MODEL_COST[params.model] ?? MODEL_COST['claude-fable-5']
-  const costUsd = cost.input * params.inputTokens + cost.output * params.outputTokens
+  const costUsd = params.model.startsWith('ollama')
+    ? 0
+    : (() => {
+        const cost = MODEL_COST[params.model] ?? MODEL_COST['claude-fable-5']
+        return cost.input * params.inputTokens + cost.output * params.outputTokens
+      })()
   getDb().prepare(`
     INSERT INTO api_calls (timestamp, model, input_tokens, output_tokens, cost_usd)
     VALUES (?, ?, ?, ?, ?)
