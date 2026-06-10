@@ -1,6 +1,7 @@
 import Anthropic from '@anthropic-ai/sdk'
 import type { BackendEvent } from './types'
 import { getTools, handleTool } from './tools/index'
+import { getSettings } from './memory/settings'
 
 const client = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY })
 
@@ -14,6 +15,11 @@ const TOOL_KEYWORDS = [
 ]
 
 export function selectModel(text: string): string {
+  let pref: 'auto' | 'fable' | 'haiku' = 'auto'
+  try { pref = getSettings().modelPreference } catch { /* db not ready in unit context */ }
+  if (pref === 'fable') return 'claude-fable-5'
+  if (pref === 'haiku') return 'claude-haiku-4-5-20251001'
+
   const lower = text.toLowerCase()
   const words = lower.trim().split(/\s+/)
   const hasToolKeyword = TOOL_KEYWORDS.some(kw => lower.includes(kw))

@@ -1,15 +1,20 @@
+import { getSettings } from './memory/settings'
+
 const ELEVENLABS_API_KEY = process.env.ELEVENLABS_API_KEY ?? ''
-// "Bill" — deep British male, close to MCU Jarvis feel
-// User can override via ELEVENLABS_VOICE_ID in .env.local
-const VOICE_ID = process.env.ELEVENLABS_VOICE_ID ?? 'pqHfZKP75CvOlQylNhV4'
+const DEFAULT_VOICE_ID = process.env.ELEVENLABS_VOICE_ID ?? 'pqHfZKP75CvOlQylNhV4'
+
+function resolveVoiceId(): string {
+  try { return getSettings().voiceId || DEFAULT_VOICE_ID } catch { return DEFAULT_VOICE_ID }
+}
 
 export async function synthesize(text: string): Promise<Buffer> {
   if (!ELEVENLABS_API_KEY) {
     throw new Error('ELEVENLABS_API_KEY not set in .env.local')
   }
 
+  const voiceId = resolveVoiceId()
   const res = await fetch(
-    `https://api.elevenlabs.io/v1/text-to-speech/${VOICE_ID}/stream`,
+    `https://api.elevenlabs.io/v1/text-to-speech/${voiceId}/stream`,
     {
       method: 'POST',
       headers: {

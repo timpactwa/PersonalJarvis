@@ -8,10 +8,13 @@ import { setEmitter } from './events'
 import { transcribe } from './whisper'
 import { chat, type Message } from './ollama'
 import { synthesize } from './elevenlabs'
-import { initDb } from './memory/db'
+import { initDb, getUsageDaily, getUsageByModel } from './memory/db'
 import { logApiCall, getStatsToday } from './memory/logger'
 import { embed, findTopK } from './memory/embeddings'
 import { getAllMemories, insertMemory } from './memory/db'
+import { resolveConfirmation, hasPending, getLatestPending } from './confirm'
+import { closeAgent } from './agents'
+import { getSettings, setSettings } from './memory/settings'
 
 // Initialize database
 initDb()
@@ -72,6 +75,40 @@ function handleRendererEvent(event: RendererEvent): void {
     broadcast({ type: 'dashboard_open' })
     return
   }
+  if (event.type === 'confirm_response') {
+    void (async () => {
+      try {
+        const result = await resolveConfirmation(event.id, event.approved)
+        broadcast({ type: 'confirm_resolved', id: event.id, approved: event.approved })
+        const msg = event.approved ? (result ?? 'Done.') : 'Cancelled.'
+        broadcast({ type: 'transcript', role: 'assistant', text: msg, partial: false })
+        broadcast({ type: 'state', state: 'speaking' })
+        try { broadcast({ type: 'audio', data: await synthesize(msg) }) } catch { /* tts optional */ }
+      } catch (err) {
+        broadcast({ type: 'error', message: String(err) })
+      } finally {
+        setTimeout(() => broadcast({ type: 'state', state: 'idle' }), 3000)
+      }
+    })()
+    return
+  }
+  if (event.type === 'agent_close') {
+    closeAgent(event.id)
+    return
+  }
+  if (event.type === 'get_usage') {
+    broadcast({ type: 'usage', daily: getUsageDaily(30), byModel: getUsageByModel(30) })
+    return
+  }
+  if (event.type === 'get_settings') {
+    broadcast({ type: 'settings', settings: getSettings() })
+    return
+  }
+  if (event.type === 'set_settings') {
+    const updated = setSettings(event.settings)
+    broadcast({ type: 'settings', settings: updated })
+    return
+  }
   // Dispatch to registered handlers
   eventHandlers.forEach(h => h(event))
 }
@@ -97,6 +134,23 @@ eventHandlers.push(async (event) => {
 
     console.log(`[pipeline] user: "${userText}"`)
     broadcast({ type: 'transcript', role: 'user', text: userText, partial: false })
+
+    // If a destructive action is awaiting confirmation, interpret this utterance as the answer.
+    if (hasPending()) {
+      const yes = /\b(yes|yeah|yep|confirm|confirmed|send it|do it|go ahead|affirmative|proceed)\b/i.test(userText)
+      const no = /\b(no|nope|cancel|stop|don'?t|negative|abort)\b/i.test(userText)
+      if (yes || no) {
+        const conf = getLatestPending()!
+        const result = await resolveConfirmation(conf.id, yes)
+        broadcast({ type: 'confirm_resolved', id: conf.id, approved: yes })
+        const reply = yes ? (result ?? 'Done.') : 'Cancelled.'
+        broadcast({ type: 'transcript', role: 'assistant', text: reply, partial: false })
+        broadcast({ type: 'state', state: 'speaking' })
+        try { broadcast({ type: 'audio', data: await synthesize(reply) }) } catch { /* tts optional */ }
+        setTimeout(() => broadcast({ type: 'state', state: 'idle' }), 3000)
+        return
+      }
+    }
 
     // Check for dashboard voice command
     const lower = userText.toLowerCase()

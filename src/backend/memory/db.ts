@@ -74,6 +74,32 @@ export function getStatsToday(): { tokens: number; cost: number } {
   return { tokens: row.tokens, cost: row.cost }
 }
 
+export function getUsageDaily(days: number): Array<{ date: string; tokens: number; cost: number }> {
+  const since = Date.now() - days * 86_400_000
+  return getDb().prepare(`
+    SELECT date(timestamp / 1000, 'unixepoch', 'localtime') as date,
+           COALESCE(SUM(input_tokens + output_tokens), 0) as tokens,
+           COALESCE(SUM(cost_usd), 0) as cost
+    FROM api_calls
+    WHERE timestamp >= ?
+    GROUP BY date
+    ORDER BY date
+  `).all(since) as Array<{ date: string; tokens: number; cost: number }>
+}
+
+export function getUsageByModel(days: number): Array<{ model: string; tokens: number; cost: number }> {
+  const since = Date.now() - days * 86_400_000
+  return getDb().prepare(`
+    SELECT model,
+           COALESCE(SUM(input_tokens + output_tokens), 0) as tokens,
+           COALESCE(SUM(cost_usd), 0) as cost
+    FROM api_calls
+    WHERE timestamp >= ?
+    GROUP BY model
+    ORDER BY cost DESC
+  `).all(since) as Array<{ model: string; tokens: number; cost: number }>
+}
+
 export function insertMemory(text: string, embedding: Float32Array): void {
   getDb().prepare(`
     INSERT INTO memories (timestamp, text, embedding) VALUES (?, ?, ?)
