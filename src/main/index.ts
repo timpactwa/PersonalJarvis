@@ -1,9 +1,8 @@
-import { app, BrowserWindow } from 'electron'
+import { app, BrowserWindow, utilityProcess } from 'electron'
 import { join } from 'path'
-import { spawn, ChildProcess } from 'child_process'
 
 let mainWindow: BrowserWindow | null = null
-let backendProcess: ChildProcess | null = null
+let backendProcess: Electron.UtilityProcess | null = null
 
 function createWindow(): void {
   mainWindow = new BrowserWindow({
@@ -19,10 +18,10 @@ function createWindow(): void {
   })
 
   // Spawn backend as child process
-  backendProcess = spawn(
-    process.execPath,
-    [join(__dirname, '../backend/index.js')],
-    { env: { ...process.env, JARVIS_PORT: '0' }, stdio: ['ignore', 'pipe', 'inherit'] }
+  backendProcess = utilityProcess.fork(
+    join(__dirname, '../backend/index.js'),
+    [],
+    { env: { ...process.env, JARVIS_PORT: '0' }, stdio: 'pipe' }
   )
 
   backendProcess.stdout?.on('data', (data: Buffer) => {
