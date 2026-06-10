@@ -12,6 +12,16 @@ export default function App(): JSX.Element {
 
   const onEvent = useCallback((event: BackendEvent) => {
     handleEvent(event)
+
+    if (event.type === 'audio') {
+      // Play TTS audio received from backend
+      const audioData = event.data as unknown as ArrayBuffer
+      const blob = new Blob([audioData], { type: 'audio/mpeg' })
+      const url = URL.createObjectURL(blob)
+      const audio = new Audio(url)
+      audio.onended = () => URL.revokeObjectURL(url)
+      audio.play().catch(err => console.error('[audio] playback error:', err))
+    }
   }, [handleEvent])
 
   const { send, sendBinary } = useWebSocket(onEvent)

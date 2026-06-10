@@ -1,3 +1,6 @@
+import { config } from 'dotenv'
+config({ path: `${process.cwd()}/.env.local` })
+
 import { WebSocketServer, WebSocket } from 'ws'
 import { createServer } from 'http'
 import type { BackendEvent, RendererEvent } from './types'
