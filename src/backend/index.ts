@@ -4,6 +4,7 @@ config({ path: `${process.cwd()}/.env.local` })
 import { WebSocketServer, WebSocket } from 'ws'
 import { createServer } from 'http'
 import type { BackendEvent, RendererEvent } from './types'
+import { setEmitter } from './events'
 import { transcribe } from './whisper'
 import { chat, type Message } from './claude'
 import { synthesize } from './elevenlabs'
@@ -27,6 +28,7 @@ export function broadcast(event: BackendEvent): void {
   const msg = event.type === 'audio' ? event.data : JSON.stringify(event)
   _activeWs.send(msg)
 }
+setEmitter(broadcast)
 
 wss.on('connection', (ws: WebSocket) => {
   _activeWs = ws
