@@ -10,6 +10,13 @@ function getDb(): Database.Database {
   return db
 }
 
+export function closeDb(): void {
+  if (db) {
+    db.close()
+    db = null
+  }
+}
+
 export function initDb(): void {
   const d = getDb()
   d.exec(`
