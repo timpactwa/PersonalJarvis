@@ -1,4 +1,4 @@
-import { readFile as fsRead, readdir } from 'fs/promises'
+import { readFile as fsRead, readdir, writeFile as fsWrite } from 'fs/promises'
 import { resolve, join } from 'path'
 
 // Allowed roots — prevents path traversal outside user dirs
@@ -51,6 +51,12 @@ export async function searchFiles(basePath: string, query: string): Promise<stri
   return matches
 }
 
+export async function writeFile(filePath: string, content: string): Promise<string> {
+  const safe = assertSafePath(filePath)
+  await fsWrite(safe, content, 'utf-8')
+  return `Wrote ${content.length} characters to ${filePath}`
+}
+
 export const filesystemToolDefs = [
   {
     name: 'fs_read',
@@ -82,6 +88,18 @@ export const filesystemToolDefs = [
       required: ['base_path', 'query'],
     },
   },
+  {
+    name: 'fs_write',
+    description: 'Write text content to a file (creates or overwrites). Restricted to the user profile directory.',
+    input_schema: {
+      type: 'object' as const,
+      properties: {
+        path: { type: 'string', description: 'Absolute path to the file' },
+        content: { type: 'string', description: 'Text content to write' },
+      },
+      required: ['path', 'content'],
+    },
+  },
 ]
 
 export async function handleFilesystemTool(name: string, input: Record<string, string>): Promise<string> {
@@ -89,6 +107,7 @@ export async function handleFilesystemTool(name: string, input: Record<string, s
     case 'fs_read':   return readFile(input.path)
     case 'fs_list':   return JSON.stringify(await listDir(input.path))
     case 'fs_search': return JSON.stringify(await searchFiles(input.base_path, input.query))
+    case 'fs_write':  return writeFile(input.path, input.content)
     default: throw new Error(`Unknown tool: ${name}`)
   }
 }

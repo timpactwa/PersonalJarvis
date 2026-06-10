@@ -33,4 +33,17 @@ describe('filesystem tools', () => {
   it('readFile rejects paths outside allowed roots', async () => {
     await expect(readFile('C:\\Windows\\jarvis-nonexistent.txt')).rejects.toThrow()
   })
+
+  it('writeFile creates a readable file', async () => {
+    const { writeFile } = await import('../../../src/backend/tools/filesystem')
+    const target = join(TMP, 'written.txt')
+    await writeFile(target, 'persisted content')
+    const back = await readFile(target)
+    expect(back).toBe('persisted content')
+  })
+
+  it('writeFile rejects paths outside allowed roots', async () => {
+    const { writeFile } = await import('../../../src/backend/tools/filesystem')
+    await expect(writeFile('C:\\Windows\\jarvis-nope.txt', 'x')).rejects.toThrow()
+  })
 })
