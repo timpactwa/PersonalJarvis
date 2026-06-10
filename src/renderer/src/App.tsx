@@ -1,4 +1,4 @@
-import { useCallback } from 'react'
+import { useCallback, useEffect, useRef } from 'react'
 import { useWebSocket } from './hooks/useWebSocket'
 import { useAnimState } from './hooks/useAnimState'
 import { ParticleRing } from './components/ParticleRing'
@@ -14,7 +14,69 @@ export default function App(): JSX.Element {
     handleEvent(event)
   }, [handleEvent])
 
-  useWebSocket(onEvent)
+  const { send, sendBinary } = useWebSocket(onEvent)
+
+  const mediaRecorderRef = useRef<MediaRecorder | null>(null)
+  const chunksRef = useRef<Blob[]>([])
+  const recordingRef = useRef(false)
+
+  useEffect(() => {
+    const startRecording = async (): Promise<void> => {
+      if (recordingRef.current) return
+      recordingRef.current = true
+
+      let stream: MediaStream
+      try {
+        stream = await navigator.mediaDevices.getUserMedia({ audio: true })
+      } catch (err) {
+        console.error('[ptt] mic access denied', err)
+        recordingRef.current = false
+        return
+      }
+
+      chunksRef.current = []
+      const mimeType = MediaRecorder.isTypeSupported('audio/webm;codecs=opus')
+        ? 'audio/webm;codecs=opus'
+        : 'audio/webm'
+      const recorder = new MediaRecorder(stream, { mimeType })
+
+      recorder.ondataavailable = (e) => {
+        if (e.data.size > 0) chunksRef.current.push(e.data)
+      }
+
+      recorder.onstop = async () => {
+        const blob = new Blob(chunksRef.current, { type: 'audio/webm' })
+        const buffer = await blob.arrayBuffer()
+        sendBinary(buffer)
+        stream.getTracks().forEach(t => t.stop())
+        recordingRef.current = false
+      }
+
+      recorder.start()
+      mediaRecorderRef.current = recorder
+      send({ type: 'command', text: '__ptt_start' })
+    }
+
+    const stopRecording = (): void => {
+      if (mediaRecorderRef.current?.state === 'recording') {
+        mediaRecorderRef.current.stop()
+      }
+    }
+
+    // Listen for PTT start from main process (Alt+Space press)
+    ;(window as any).jarvis.onPttStart(startRecording)
+
+    // Alt+Space key-up stops recording
+    const onKeyUp = (e: KeyboardEvent): void => {
+      if (e.key === ' ' && e.altKey) stopRecording()
+    }
+    window.addEventListener('keyup', onKeyUp)
+
+    return () => {
+      window.removeEventListener('keyup', onKeyUp)
+      stopRecording()
+    }
+  }, [send, sendBinary])
 
   return (
     <div style={{ width: '100vw', height: '100vh', background: '#060b14', position: 'relative' }}>

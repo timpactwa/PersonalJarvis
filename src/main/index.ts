@@ -1,4 +1,4 @@
-import { app, BrowserWindow, utilityProcess } from 'electron'
+import { app, BrowserWindow, globalShortcut, utilityProcess } from 'electron'
 import { join } from 'path'
 
 let mainWindow: BrowserWindow | null = null
@@ -50,10 +50,17 @@ function createWindow(): void {
 
 app.whenReady().then(() => {
   createWindow()
+
+  globalShortcut.register('Alt+Space', () => {
+    mainWindow?.webContents.send('ptt-start')
+  })
+
   app.on('activate', () => {
     if (BrowserWindow.getAllWindows().length === 0) createWindow()
   })
 })
+
+app.on('will-quit', () => globalShortcut.unregisterAll())
 
 app.on('window-all-closed', () => {
   backendProcess?.kill()
