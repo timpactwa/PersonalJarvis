@@ -1,7 +1,7 @@
 import { useCallback } from 'react'
 import { useWebSocket } from './hooks/useWebSocket'
 import { useAnimState } from './hooks/useAnimState'
-import type { BackendEvent } from '../../../backend/types'
+import type { BackendEvent } from '../../backend/types'
 
 export default function App(): JSX.Element {
   const { state, handleEvent } = useAnimState()

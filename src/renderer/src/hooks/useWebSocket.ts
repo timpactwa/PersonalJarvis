@@ -21,9 +21,11 @@ export function useWebSocket(onEvent: Handler): {
       ;(window as any).jarvis.onBackendPort((port: number) => {
         ws = new WebSocket(`ws://127.0.0.1:${port}`)
         ws.binaryType = 'arraybuffer'
+        ws.onerror = (err) => console.error('[ws] connection error', err)
 
         ws.onmessage = (e) => {
           if (e.data instanceof ArrayBuffer) {
+            // e.data is ArrayBuffer in browser context (ws.binaryType = 'arraybuffer')
             handlers.forEach(h => h({ type: 'audio', data: e.data as unknown as Buffer }))
           } else {
             try {
