@@ -4,11 +4,12 @@ import { useAnimState } from './hooks/useAnimState'
 import { ParticleRing } from './components/ParticleRing'
 import { HudOverlay } from './components/HudOverlay'
 import { Transcript } from './components/Transcript'
+import { Dashboard } from './components/Dashboard'
 import type { BackendEvent } from '../../backend/types'
 import './styles/global.css'
 
 export default function App(): JSX.Element {
-  const { state, handleEvent } = useAnimState()
+  const { state, handleEvent, toggleDashboard } = useAnimState()
 
   const onEvent = useCallback((event: BackendEvent) => {
     handleEvent(event)
@@ -96,8 +97,16 @@ export default function App(): JSX.Element {
         tokensToday={state.tokensToday}
         costToday={state.costToday}
         model={state.model}
+        onStatsClick={toggleDashboard}
       />
       <Transcript userText={state.userText} assistantText={state.assistantText} />
+      <Dashboard
+        open={state.dashboardOpen}
+        onClose={toggleDashboard}
+        tokensToday={state.tokensToday}
+        costToday={state.costToday}
+        model={state.model}
+      />
     </div>
   )
 }

@@ -19,6 +19,7 @@ interface Props {
   tokensToday: number
   costToday: number
   model: string
+  onStatsClick?: () => void
 }
 
 const hud: React.CSSProperties = {
@@ -38,7 +39,7 @@ const line: React.CSSProperties = {
   margin: '3px 0',
 }
 
-export function HudOverlay({ animState, tokensToday, costToday, model }: Props): JSX.Element {
+export function HudOverlay({ animState, tokensToday, costToday, model, onStatsClick }: Props): JSX.Element {
   return (
     <>
       {/* Top-left: identity + status */}
@@ -48,8 +49,23 @@ export function HudOverlay({ animState, tokensToday, costToday, model }: Props):
         <div style={{ color: STATUS_COLORS[animState] }}>{STATUS_LABELS[animState]}</div>
       </div>
 
-      {/* Top-right: stats */}
-      <div style={{ ...hud, top: 24, right: 24, textAlign: 'right' }}>
+      {/* Top-right: stats (clickable to open dashboard) */}
+      <div
+        id="hud-stats"
+        onClick={onStatsClick}
+        style={{
+          ...hud,
+          top: 24,
+          right: 24,
+          textAlign: 'right',
+          pointerEvents: onStatsClick ? 'auto' : 'none',
+          cursor: onStatsClick ? 'pointer' : 'default',
+          transition: 'filter 0.2s',
+        }}
+        className="no-drag"
+        onMouseEnter={e => { if (onStatsClick) e.currentTarget.style.filter = 'brightness(1.3)' }}
+        onMouseLeave={e => { e.currentTarget.style.filter = 'brightness(1)' }}
+      >
         <div>{tokensToday.toLocaleString()} TOKENS</div>
         <div style={{ ...line, marginLeft: 'auto' }} />
         <div>${costToday.toFixed(4)} TODAY</div>

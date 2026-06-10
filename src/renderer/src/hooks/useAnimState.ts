@@ -24,6 +24,7 @@ const initial: JarvisState = {
 export function useAnimState(): {
   state: JarvisState
   handleEvent: (event: BackendEvent) => void
+  toggleDashboard: () => void
 } {
   const [state, setState] = useState<JarvisState>(initial)
 
@@ -45,5 +46,9 @@ export function useAnimState(): {
     })
   }, [])
 
-  return { state, handleEvent }
+  const toggleDashboard = useCallback(() => {
+    setState(prev => ({ ...prev, dashboardOpen: !prev.dashboardOpen }))
+  }, [])
+
+  return { state, handleEvent, toggleDashboard }
 }
