@@ -8,10 +8,9 @@ import { setEmitter } from './events'
 import { transcribe } from './whisper'
 import { chat, type Message } from './ollama'
 import { synthesize } from './elevenlabs'
-import { initDb, getUsageDaily, getUsageByModel } from './memory/db'
+import { initDb, getUsageDaily, getUsageByModel, getAllMemories, insertMemory } from './memory/db'
 import { logApiCall, getStatsToday } from './memory/logger'
 import { embed, findTopK } from './memory/embeddings'
-import { getAllMemories, insertMemory } from './memory/db'
 import { resolveConfirmation, hasPending, getLatestPending } from './confirm'
 import { closeAgent } from './agents'
 import { getSettings, setSettings } from './memory/settings'
@@ -97,7 +96,11 @@ function handleRendererEvent(event: RendererEvent): void {
     return
   }
   if (event.type === 'get_usage') {
-    broadcast({ type: 'usage', daily: getUsageDaily(30), byModel: getUsageByModel(30) })
+    try {
+      broadcast({ type: 'usage', daily: getUsageDaily(30), byModel: getUsageByModel(30) })
+    } catch (err) {
+      broadcast({ type: 'error', message: String(err) })
+    }
     return
   }
   if (event.type === 'get_settings') {

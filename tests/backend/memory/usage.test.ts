@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach, afterEach } from 'vitest'
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
 import { unlinkSync, existsSync } from 'fs'
 
 const TEST_DB = 'tests/usage-test.db'
@@ -8,6 +8,7 @@ function cleanup(): void {
 
 describe('usage aggregation', () => {
   beforeEach(async () => {
+    vi.resetModules()
     process.env.JARVIS_DB_PATH = TEST_DB
     const { closeDb } = await import('../../../src/backend/memory/db')
     closeDb(); cleanup()
