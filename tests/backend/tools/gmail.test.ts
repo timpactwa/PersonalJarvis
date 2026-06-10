@@ -22,4 +22,21 @@ describe('gmail tools', () => {
     expect(names).toContain('gmail_search')
     expect(names).toContain('gmail_read')
   })
+
+  it('exposes gmail_send and gmail_draft tools', async () => {
+    const { gmailToolDefs } = await import('../../../src/backend/tools/gmail')
+    const names = gmailToolDefs.map(t => t.name)
+    expect(names).toContain('gmail_send')
+    expect(names).toContain('gmail_draft')
+  })
+
+  it('gmail_send queues a confirmation instead of sending immediately', async () => {
+    const { clearPending, hasPending } = await import('../../../src/backend/confirm')
+    const { handleGmailTool } = await import('../../../src/backend/tools/gmail')
+    clearPending()
+    const reply = await handleGmailTool('gmail_send', { to: 'a@b.com', subject: 'Hi', body: 'There' })
+    expect(reply.toLowerCase()).toContain('shall i send')
+    expect(hasPending()).toBe(true)
+    clearPending()
+  })
 })

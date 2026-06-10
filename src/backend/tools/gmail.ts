@@ -3,11 +3,17 @@ import { OAuth2Client } from 'google-auth-library'
 import { readFileSync, writeFileSync, existsSync } from 'fs'
 import { join } from 'path'
 import { createServer } from 'http'
+import { requestConfirmation } from '../confirm'
+import { emitEvent } from '../events'
 
 const TOKEN_PATH = join(process.cwd(), '.gmail-token.json')
 const CREDS_PATH = join(process.cwd(), '.gmail-credentials.json')
 
-const SCOPES = ['https://www.googleapis.com/auth/gmail.readonly']
+const SCOPES = [
+  'https://www.googleapis.com/auth/gmail.readonly',
+  'https://www.googleapis.com/auth/gmail.compose',
+  'https://www.googleapis.com/auth/gmail.send',
+]
 
 function getOAuth2Client(): OAuth2Client {
   if (!existsSync(CREDS_PATH)) {
@@ -90,6 +96,40 @@ export async function readEmail(messageId: string): Promise<string> {
   return body.slice(0, 5000)
 }
 
+function buildRawMessage(to: string, subject: string, body: string): string {
+  const lines = [
+    `To: ${to}`,
+    `Subject: ${subject}`,
+    'Content-Type: text/plain; charset="UTF-8"',
+    'MIME-Version: 1.0',
+    '',
+    body,
+  ]
+  return Buffer.from(lines.join('\r\n')).toString('base64url')
+}
+
+async function sendEmailNow(to: string, subject: string, body: string): Promise<string> {
+  const auth = await getAuthorizedClient()
+  const gmail = google.gmail({ version: 'v1', auth })
+  await gmail.users.messages.send({ userId: 'me', requestBody: { raw: buildRawMessage(to, subject, body) } })
+  return `Email sent to ${to}.`
+}
+
+export async function queueSendEmail(to: string, subject: string, body: string): Promise<string> {
+  if (!to) throw new Error('Recipient (to) is required')
+  const conf = requestConfirmation('Send email', `To: ${to}\nSubject: ${subject}`, () => sendEmailNow(to, subject, body))
+  emitEvent({ type: 'confirm_request', id: conf.id, action: conf.action, detail: conf.detail })
+  return `I've drafted an email to ${to} with subject "${subject}". Shall I send it?`
+}
+
+export async function createDraft(to: string, subject: string, body: string): Promise<string> {
+  if (!to) throw new Error('Recipient (to) is required')
+  const auth = await getAuthorizedClient()
+  const gmail = google.gmail({ version: 'v1', auth })
+  await gmail.users.drafts.create({ userId: 'me', requestBody: { message: { raw: buildRawMessage(to, subject, body) } } })
+  return `Draft saved for ${to}.`
+}
+
 export const gmailToolDefs = [
   {
     name: 'gmail_search',
@@ -114,12 +154,40 @@ export const gmailToolDefs = [
       required: ['message_id'],
     },
   },
+  {
+    name: 'gmail_send',
+    description: 'Send an email. This is a destructive action: it will be queued for explicit user confirmation before sending.',
+    input_schema: {
+      type: 'object' as const,
+      properties: {
+        to: { type: 'string', description: 'Recipient email address' },
+        subject: { type: 'string', description: 'Email subject' },
+        body: { type: 'string', description: 'Plain-text email body' },
+      },
+      required: ['to', 'subject', 'body'],
+    },
+  },
+  {
+    name: 'gmail_draft',
+    description: 'Create a Gmail draft without sending it. Safe, non-destructive.',
+    input_schema: {
+      type: 'object' as const,
+      properties: {
+        to: { type: 'string', description: 'Recipient email address' },
+        subject: { type: 'string', description: 'Email subject' },
+        body: { type: 'string', description: 'Plain-text email body' },
+      },
+      required: ['to', 'subject', 'body'],
+    },
+  },
 ]
 
 export async function handleGmailTool(name: string, input: Record<string, any>): Promise<string> {
   switch (name) {
     case 'gmail_search': return searchEmails(input.query, input.max_results)
     case 'gmail_read':   return readEmail(input.message_id)
+    case 'gmail_send':   return queueSendEmail(input.to, input.subject, input.body)
+    case 'gmail_draft':  return createDraft(input.to, input.subject, input.body)
     default: throw new Error(`Unknown tool: ${name}`)
   }
 }
