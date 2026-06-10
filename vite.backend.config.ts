@@ -32,6 +32,7 @@ export default defineConfig({
         'better-sqlite3',
         'dotenv',
         '@anthropic-ai/sdk',
+        '@anthropic-ai/claude-agent-sdk',
         '@xenova/transformers',
         'googleapis',
         'google-auth-library',
