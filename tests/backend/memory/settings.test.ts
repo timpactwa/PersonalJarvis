@@ -28,6 +28,8 @@ describe('settings store', () => {
     expect(s.hotkey).toBe('Alt+Space')
     expect(s.modelPreference).toBe('auto')
     expect(s.shortTurns).toBe(20)
+    expect(s.ollamaModel).toBe('llama3.1:8b')
+    expect(s.ollamaBaseUrl).toBe('http://127.0.0.1:11434')
   })
 
   it('persists and merges partial updates', async () => {

@@ -6,6 +6,8 @@ export interface Settings {
   voiceId: string
   modelPreference: 'auto' | 'fable' | 'haiku'
   shortTurns: number
+  ollamaModel: string
+  ollamaBaseUrl: string
 }
 
 export interface AgentInfo {

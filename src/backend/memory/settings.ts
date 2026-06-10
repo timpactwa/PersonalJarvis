@@ -6,6 +6,8 @@ const DEFAULTS: Settings = {
   voiceId: process.env.ELEVENLABS_VOICE_ID ?? 'pqHfZKP75CvOlQylNhV4',
   modelPreference: 'auto',
   shortTurns: 20,
+  ollamaModel: process.env.OLLAMA_MODEL ?? 'llama3.1:8b',
+  ollamaBaseUrl: process.env.OLLAMA_BASE_URL ?? 'http://127.0.0.1:11434',
 }
 
 export function getSettings(): Settings {
@@ -24,6 +26,8 @@ export function getSettings(): Settings {
     voiceId: map.get('voiceId') ?? DEFAULTS.voiceId,
     modelPreference,
     shortTurns,
+    ollamaModel: map.get('ollamaModel') ?? DEFAULTS.ollamaModel,
+    ollamaBaseUrl: map.get('ollamaBaseUrl') ?? DEFAULTS.ollamaBaseUrl,
   }
 }
 
