@@ -1,6 +1,7 @@
 import { WebSocketServer, WebSocket } from 'ws'
 import { createServer } from 'http'
 import type { BackendEvent, RendererEvent } from './types'
+import { transcribe } from './whisper'
 
 const server = createServer()
 const wss = new WebSocketServer({ server })
@@ -61,4 +62,27 @@ server.listen(PORT, '127.0.0.1', () => {
   const addr = server.address() as { port: number }
   // Print port to stdout so Electron main process can discover it
   process.stdout.write(JSON.stringify({ type: 'ready', port: addr.port }) + '\n')
+})
+
+// Handle incoming audio from PTT
+eventHandlers.push(async (event) => {
+  if (event.type !== 'audio') return
+
+  broadcast({ type: 'state', state: 'thinking' })
+
+  try {
+    const text = await transcribe(event.data)
+    if (!text) {
+      broadcast({ type: 'state', state: 'idle' })
+      return
+    }
+    broadcast({ type: 'transcript', role: 'user', text, partial: false })
+    // Claude handler will be added in Task 9 / Task 10
+    // For now, just return to idle after showing transcript
+    broadcast({ type: 'state', state: 'idle' })
+  } catch (err) {
+    console.error('[whisper] error:', err)
+    broadcast({ type: 'error', message: String(err) })
+    broadcast({ type: 'state', state: 'idle' })
+  }
 })
