@@ -48,4 +48,13 @@ describe('settings store', () => {
     setSettings({ shortTurns: 8 })
     expect(getSettings().shortTurns).toBe(8)
   })
+
+  it('updates an existing key on repeated set', async () => {
+    const { initDb } = await import('../../../src/backend/memory/db')
+    const { setSettings, getSettings } = await import('../../../src/backend/memory/settings')
+    initDb()
+    setSettings({ hotkey: 'Control+Space' })
+    setSettings({ hotkey: 'Alt+J' })
+    expect(getSettings().hotkey).toBe('Alt+J')
+  })
 })

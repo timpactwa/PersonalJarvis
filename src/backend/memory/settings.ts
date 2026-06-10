@@ -11,11 +11,19 @@ const DEFAULTS: Settings = {
 export function getSettings(): Settings {
   const rows = getDb().prepare('SELECT key, value FROM settings').all() as Array<{ key: string; value: string }>
   const map = new Map(rows.map(r => [r.key, r.value]))
+
+  const rawPref = map.get('modelPreference')
+  const modelPreference: Settings['modelPreference'] =
+    rawPref === 'fable' || rawPref === 'haiku' || rawPref === 'auto' ? rawPref : DEFAULTS.modelPreference
+
+  const rawTurns = map.has('shortTurns') ? parseInt(map.get('shortTurns')!, 10) : DEFAULTS.shortTurns
+  const shortTurns = Number.isFinite(rawTurns) ? rawTurns : DEFAULTS.shortTurns
+
   return {
     hotkey: map.get('hotkey') ?? DEFAULTS.hotkey,
     voiceId: map.get('voiceId') ?? DEFAULTS.voiceId,
-    modelPreference: (map.get('modelPreference') as Settings['modelPreference']) ?? DEFAULTS.modelPreference,
-    shortTurns: map.has('shortTurns') ? parseInt(map.get('shortTurns')!, 10) : DEFAULTS.shortTurns,
+    modelPreference,
+    shortTurns,
   }
 }
 
