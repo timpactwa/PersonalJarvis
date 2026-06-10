@@ -91,6 +91,10 @@ export default function App(): JSX.Element {
     }
   }, [send, sendBinary])
 
+  useEffect(() => {
+    if (state.dashboardOpen) send({ type: 'get_usage' })
+  }, [state.dashboardOpen, send])
+
   return (
     <div style={{ width: '100vw', height: '100vh', background: '#060b14', position: 'relative' }}>
       <ParticleRing state={state.anim} />
@@ -117,6 +121,9 @@ export default function App(): JSX.Element {
         tokensToday={state.tokensToday}
         costToday={state.costToday}
         model={state.model}
+        daily={state.usageDaily}
+        byModel={state.usageByModel}
+        onOpenSettings={() => { toggleDashboard(); toggleSettings() }}
       />
     </div>
   )

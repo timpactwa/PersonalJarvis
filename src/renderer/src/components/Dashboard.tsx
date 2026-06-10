@@ -1,3 +1,6 @@
+import { UsageGraph } from './UsageGraph'
+import type { UsagePoint, ModelUsage } from '../../../backend/types'
+
 interface DashboardStats {
   tokensToday: number
   costToday: number
@@ -7,9 +10,12 @@ interface DashboardStats {
 interface Props extends DashboardStats {
   open: boolean
   onClose: () => void
+  daily: UsagePoint[]
+  byModel: ModelUsage[]
+  onOpenSettings: () => void
 }
 
-export function Dashboard({ open, onClose, tokensToday, costToday, model }: Props): JSX.Element | null {
+export function Dashboard({ open, onClose, tokensToday, costToday, model, daily, byModel, onOpenSettings }: Props): JSX.Element | null {
   if (!open) return null
 
   const panelStyle: React.CSSProperties = {
@@ -131,6 +137,19 @@ export function Dashboard({ open, onClose, tokensToday, costToday, model }: Prop
             OPERATIONAL
           </span>
         </div>
+
+        <UsageGraph daily={daily} byModel={byModel} />
+
+        <button
+          onClick={onOpenSettings}
+          className="no-drag"
+          style={{
+            marginTop: 18, width: '100%', background: 'none',
+            border: '1px solid rgba(125,211,252,0.2)', color: '#7dd3fc',
+            cursor: 'pointer', fontFamily: '"Orbitron", monospace', fontSize: 11,
+            letterSpacing: '0.12em', padding: '8px 0', borderRadius: 4,
+          }}
+        >OPEN SETTINGS</button>
 
         <div style={{
           marginTop: '20px',
