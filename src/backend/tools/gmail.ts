@@ -97,9 +97,10 @@ export async function readEmail(messageId: string): Promise<string> {
 }
 
 function buildRawMessage(to: string, subject: string, body: string): string {
+  const safeHeader = (v: string): string => v.replace(/[\r\n]+/g, ' ').trim()
   const lines = [
-    `To: ${to}`,
-    `Subject: ${subject}`,
+    `To: ${safeHeader(to)}`,
+    `Subject: ${safeHeader(subject)}`,
     'Content-Type: text/plain; charset="UTF-8"',
     'MIME-Version: 1.0',
     '',
@@ -119,7 +120,7 @@ export async function queueSendEmail(to: string, subject: string, body: string):
   if (!to) throw new Error('Recipient (to) is required')
   const conf = requestConfirmation('Send email', `To: ${to}\nSubject: ${subject}`, () => sendEmailNow(to, subject, body))
   emitEvent({ type: 'confirm_request', id: conf.id, action: conf.action, detail: conf.detail })
-  return `I've drafted an email to ${to} with subject "${subject}". Shall I send it?`
+  return `I've prepared an email to ${to} with subject "${subject}". Shall I send it?`
 }
 
 export async function createDraft(to: string, subject: string, body: string): Promise<string> {
