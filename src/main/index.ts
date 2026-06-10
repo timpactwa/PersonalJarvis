@@ -24,14 +24,21 @@ function createWindow(): void {
     { env: { ...process.env, JARVIS_PORT: '0' }, stdio: 'pipe' }
   )
 
+  let stdoutBuf = ''
   backendProcess.stdout?.on('data', (data: Buffer) => {
-    try {
-      const msg = JSON.parse(data.toString().trim())
-      if (msg.type === 'ready') {
-        process.env.JARVIS_BACKEND_PORT = String(msg.port)
-        mainWindow?.webContents.send('backend-port', msg.port)
-      }
-    } catch { /* partial line */ }
+    stdoutBuf += data.toString()
+    const lines = stdoutBuf.split('\n')
+    stdoutBuf = lines.pop()!
+    for (const line of lines) {
+      if (!line.trim()) continue
+      try {
+        const msg = JSON.parse(line)
+        if (msg.type === 'ready') {
+          process.env.JARVIS_BACKEND_PORT = String(msg.port)
+          mainWindow?.webContents.send('backend-port', msg.port)
+        }
+      } catch { console.error('[main] bad backend stdout line:', line) }
+    }
   })
 
   if (process.env.ELECTRON_RENDERER_URL) {

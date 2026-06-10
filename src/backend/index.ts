@@ -1,25 +1,23 @@
 import { WebSocketServer, WebSocket } from 'ws'
-import express from 'express'
 import { createServer } from 'http'
 import type { BackendEvent, RendererEvent } from './types'
 
-const app = express()
-const server = createServer(app)
+const server = createServer()
 const wss = new WebSocketServer({ server })
 
 const PORT = parseInt(process.env.JARVIS_PORT ?? '0', 10)
 
-export let broadcast: (event: BackendEvent) => void = () => {}
+let _activeWs: WebSocket | null = null
+
+export function broadcast(event: BackendEvent): void {
+  if (!_activeWs || _activeWs.readyState !== WebSocket.OPEN) return
+  const msg = event.type === 'audio' ? event.data : JSON.stringify(event)
+  _activeWs.send(msg)
+}
 
 wss.on('connection', (ws: WebSocket) => {
+  _activeWs = ws
   console.log('[backend] renderer connected')
-
-  broadcast = (event: BackendEvent) => {
-    const msg = event.type === 'audio'
-      ? event.data
-      : JSON.stringify(event)
-    if (ws.readyState === WebSocket.OPEN) ws.send(msg)
-  }
 
   ws.on('message', (raw) => {
     if (Buffer.isBuffer(raw)) {
@@ -33,7 +31,10 @@ wss.on('connection', (ws: WebSocket) => {
     }
   })
 
-  ws.on('close', () => console.log('[backend] renderer disconnected'))
+  ws.on('close', () => {
+    _activeWs = null
+    console.log('[backend] renderer disconnected')
+  })
 
   // Send initial state on connect
   broadcast({ type: 'state', state: 'idle' })

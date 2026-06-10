@@ -7,6 +7,7 @@
   "author": "TPACT",
   "license": "MIT",
   "scripts": {
+    "predev": "npx vite build --config vite.backend.config.ts",
     "dev": "electron-vite dev",
     "build": "electron-vite build && npx vite build --config vite.backend.config.ts",
     "build:backend": "npx vite build --config vite.backend.config.ts",
