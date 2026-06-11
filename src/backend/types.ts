@@ -23,6 +23,31 @@ export interface AgentInfo {
 export interface UsagePoint { date: string; tokens: number; cost: number }
 export interface ModelUsage { model: string; tokens: number; cost: number }
 
+export interface EmailDraft {
+  id: string
+  to: string
+  cc: string
+  bcc: string
+  subject: string
+  body: string
+}
+
+export interface EmailMessage {
+  id: string
+  from: string
+  subject: string
+  date: string
+  body: string
+}
+
+export interface CalendarEventDraft {
+  id: string
+  title: string
+  start: string
+  end: string
+  description: string
+}
+
 export type BackendEvent =
   | { type: 'state'; state: AnimState }
   | { type: 'transcript'; role: 'user' | 'assistant'; text: string; partial: boolean }
@@ -38,6 +63,10 @@ export type BackendEvent =
   | { type: 'agent_error'; id: string; message: string }
   | { type: 'usage'; daily: UsagePoint[]; byModel: ModelUsage[] }
   | { type: 'settings'; settings: Settings }
+  | { type: 'email_compose'; draft: EmailDraft }
+  | { type: 'email_view'; emails: EmailMessage[] }
+  | { type: 'event_compose'; event: CalendarEventDraft }
+  | { type: 'toggle_text' }
 
 // Events sent from renderer → backend
 export type RendererEvent =
@@ -49,3 +78,6 @@ export type RendererEvent =
   | { type: 'get_usage' }
   | { type: 'get_settings' }
   | { type: 'set_settings'; settings: Partial<Settings> }
+  | { type: 'email_send'; draft: EmailDraft }
+  | { type: 'email_draft_save'; draft: EmailDraft }
+  | { type: 'event_create'; event: CalendarEventDraft }

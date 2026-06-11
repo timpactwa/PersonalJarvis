@@ -23,24 +23,24 @@ export function SettingsPanel({ open, settings, onClose, onSave, onHotkeyChange 
 
   const panel: React.CSSProperties = {
     position: 'absolute', top: '50%', left: '50%', transform: 'translate(-50%, -50%)',
-    width: 460, background: 'rgba(6, 11, 20, 0.94)', border: '1px solid rgba(125,211,252,0.2)',
-    borderRadius: 8, padding: 28, fontFamily: '"Orbitron", monospace', color: '#7dd3fc',
-    backdropFilter: 'blur(12px)', zIndex: 130, boxShadow: '0 0 40px rgba(59,130,246,0.15)',
+    width: 460, background: 'rgba(255, 255, 255, 0.96)', border: '1px solid rgba(3,105,161,0.15)',
+    borderRadius: 12, padding: 28, fontFamily: '"Orbitron", monospace', color: 'var(--text)',
+    backdropFilter: 'blur(20px)', zIndex: 130, boxShadow: '0 8px 40px rgba(3,80,140,0.14)',
   }
-  const label: React.CSSProperties = { fontSize: 10, letterSpacing: '0.12em', display: 'block', marginBottom: 6, color: '#94a3b8' }
+  const label: React.CSSProperties = { fontSize: 10, letterSpacing: '0.12em', display: 'block', marginBottom: 6, color: 'var(--text-mid)' }
   const field: React.CSSProperties = {
-    width: '100%', background: 'rgba(125,211,252,0.06)', border: '1px solid rgba(125,211,252,0.18)',
-    borderRadius: 4, color: '#e0f2fe', padding: '8px 10px', fontFamily: '"Share Tech Mono", monospace',
-    fontSize: 12, marginBottom: 16,
+    width: '100%', background: 'rgba(3,105,161,0.05)', border: '1px solid rgba(3,105,161,0.18)',
+    borderRadius: 4, color: '#0a2540', padding: '8px 10px', fontFamily: '"Share Tech Mono", monospace',
+    fontSize: 12, marginBottom: 16, outline: 'none',
   }
 
   return (
     <>
-      <div onClick={onClose} style={{ position: 'absolute', inset: 0, background: 'rgba(0,0,0,0.3)', zIndex: 129 }} />
+      <div onClick={onClose} style={{ position: 'absolute', inset: 0, background: 'rgba(200,220,240,0.25)', backdropFilter: 'blur(2px)', zIndex: 129 }} />
       <div style={panel} className="no-drag">
         <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 20 }}>
-          <span style={{ fontSize: 13, fontWeight: 700, letterSpacing: '0.15em' }}>SETTINGS</span>
-          <button onClick={onClose} style={{ background: 'none', border: 'none', color: '#4a6a8a', cursor: 'pointer', fontSize: 14 }}>✕</button>
+          <span style={{ fontSize: 13, fontWeight: 700, letterSpacing: '0.15em', color: 'var(--text)' }}>SETTINGS</span>
+          <button onClick={onClose} style={{ background: 'none', border: 'none', color: 'var(--text-mid)', cursor: 'pointer', fontSize: 14 }}>✕</button>
         </div>
 
         <label style={label}>PUSH-TO-TALK HOTKEY</label>
@@ -79,8 +79,8 @@ export function SettingsPanel({ open, settings, onClose, onSave, onHotkeyChange 
         <button
           onClick={save}
           style={{
-            width: '100%', background: 'rgba(125,211,252,0.1)', border: '1px solid rgba(125,211,252,0.4)',
-            color: '#e0f2fe', cursor: 'pointer', fontFamily: '"Orbitron", monospace', fontSize: 12,
+            width: '100%', background: 'rgba(3,105,161,0.08)', border: '1px solid rgba(3,105,161,0.3)',
+            color: 'var(--accent)', cursor: 'pointer', fontFamily: '"Orbitron", monospace', fontSize: 12,
             letterSpacing: '0.12em', padding: '10px 0', borderRadius: 4,
           }}
         >SAVE</button>

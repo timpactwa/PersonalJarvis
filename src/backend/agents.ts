@@ -1,7 +1,8 @@
-import { query } from '@anthropic-ai/claude-agent-sdk'
 import { randomUUID } from 'crypto'
 import { emitEvent } from './events'
 import type { AgentInfo } from './types'
+
+const dynamicImport = new Function('specifier', 'return import(specifier)')
 
 // Built-in Agent SDK tools the worker may use autonomously (read-only + web).
 const AGENT_TOOLS = ['Read', 'Glob', 'Grep', 'WebSearch', 'WebFetch']
@@ -46,6 +47,7 @@ export async function spawnAgent(name: string, task: string): Promise<string> {
 
 async function runAgent(info: AgentInfo): Promise<void> {
   try {
+    const { query } = await dynamicImport('@anthropic-ai/claude-agent-sdk')
     for await (const message of query({
       prompt: info.task,
       options: { allowedTools: AGENT_TOOLS, permissionMode: 'bypassPermissions', maxTurns: MAX_TURNS },

@@ -1,4 +1,4 @@
-import { getDb } from './db'
+import { getDb, isDbAvailable } from './db'
 import type { Settings } from '../types'
 
 const DEFAULTS: Settings = {
@@ -11,6 +11,8 @@ const DEFAULTS: Settings = {
 }
 
 export function getSettings(): Settings {
+  if (!isDbAvailable()) return { ...DEFAULTS }
+
   const rows = getDb().prepare('SELECT key, value FROM settings').all() as Array<{ key: string; value: string }>
   const map = new Map(rows.map(r => [r.key, r.value]))
 
@@ -32,6 +34,8 @@ export function getSettings(): Settings {
 }
 
 export function setSettings(partial: Partial<Settings>): Settings {
+  if (!isDbAvailable()) return { ...DEFAULTS, ...partial }
+
   const stmt = getDb().prepare(
     'INSERT INTO settings (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value',
   )

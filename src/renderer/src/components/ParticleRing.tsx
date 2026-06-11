@@ -61,18 +61,18 @@ interface Params {
 }
 
 const STATE_PARAMS: Record<AnimState, Params> = {
-  idle: { speed: 1.0, radiusMult: 1.0, scatter: 1.0, glow: 0.12, blue: 0.0, listenWave: 0, speakWave: 0, jitter: 0, breath: 0.005, trail: 0.5 },
-  listening: { speed: 0.85, radiusMult: 0.93, scatter: 0.55, glow: 0.32, blue: 0.15, listenWave: 1, speakWave: 0, jitter: 0, breath: 0.003, trail: 0.46 },
-  thinking: { speed: 2.7, radiusMult: 1.0, scatter: 2.1, glow: 0.85, blue: 1.0, listenWave: 0, speakWave: 0, jitter: 1, breath: 0.004, trail: 0.3 },
-  speaking: { speed: 1.55, radiusMult: 1.04, scatter: 1.25, glow: 0.55, blue: 0.35, listenWave: 0, speakWave: 1, jitter: 0, breath: 0.02, trail: 0.42 }
+  idle:      { speed: 1.0,  radiusMult: 1.0,  scatter: 1.0,  glow: 0.18, blue: 0.25, listenWave: 0, speakWave: 0, jitter: 0,   breath: 0.005, trail: 0.70 },
+  listening: { speed: 0.80, radiusMult: 0.92, scatter: 0.5,  glow: 0.45, blue: 0.65, listenWave: 1, speakWave: 0, jitter: 0,   breath: 0.003, trail: 0.64 },
+  thinking:  { speed: 2.8,  radiusMult: 1.0,  scatter: 2.2,  glow: 0.90, blue: 1.0,  listenWave: 0, speakWave: 0, jitter: 1,   breath: 0.004, trail: 0.52 },
+  speaking:  { speed: 1.6,  radiusMult: 1.05, scatter: 1.3,  glow: 0.62, blue: 0.50, listenWave: 0, speakWave: 1, jitter: 0,   breath: 0.022, trail: 0.62 },
 }
 
-const NUM_PARTICLES = 180
-const NUM_DUST = 80
-const RING_RADIUS_RATIO = 0.26 // center gap diameter ≈ 40-45% of minDim
-const RING_THICKNESS_RATIO = 0.05 // particle zone ≈ 8-10% of minDim wide
-const PARAM_LERP = 0.045 // ~30-40 frame state transitions
-const BG = { r: 6, g: 11, b: 20 } // #060b14
+const NUM_PARTICLES = 130
+const NUM_DUST = 40
+const RING_RADIUS_RATIO = 0.26
+const RING_THICKNESS_RATIO = 0.05
+const PARAM_LERP = 0.045
+const BG = { r: 221, g: 239, b: 255 } // #ddeff — dream sky
 
 /** Sum of 3 uniforms -> soft gaussian-ish distribution in [-1, 1]. */
 function softRandom(): number {
@@ -147,8 +147,8 @@ export function ParticleRing({ state }: Props): JSX.Element {
 
     const particles = createParticles()
     const dust = createDust()
-    const haloSilver = makeHaloSprite(205, 228, 255)
-    const haloBlue = makeHaloSprite(70, 140, 255)
+    const haloSilver = makeHaloSprite(20, 80, 180)   // deep navy glow
+    const haloBlue   = makeHaloSprite(0, 130, 225)   // sky blue glow
 
     // Live (lerped) parameter vector — starts at current state's targets.
     const p0 = STATE_PARAMS[stateRef.current]
@@ -212,22 +212,24 @@ export function ParticleRing({ state }: Props): JSX.Element {
       ctx.fillRect(0, 0, w, h)
       firstFrame = false
 
-      // --- Ambient ring under-glow (tinted toward blue while thinking).
+      // --- Ambient ring shadow — dark navy annular depth (visible on light bg).
       const pulse = 0.72 + 0.28 * Math.sin(time * 0.06)
-      const ambient = (0.035 + cur.glow * 0.085) * (cur.blue > 0.4 ? pulse : 1)
+      const ambient = (0.025 + cur.glow * 0.055) * (cur.blue > 0.4 ? pulse : 1)
       if (ambient > 0.004) {
         const gr = ctx.createRadialGradient(cx, cy, ringRadius * 0.62, cx, cy, ringRadius * 1.45)
-        const ar = Math.round(lerp(150, 70, cur.blue))
-        const ag = Math.round(lerp(185, 135, cur.blue))
-        gr.addColorStop(0, `rgba(${ar},${ag},255,0)`)
-        gr.addColorStop(0.45, `rgba(${ar},${ag},255,${ambient.toFixed(3)})`)
-        gr.addColorStop(1, `rgba(${ar},${ag},255,0)`)
+        // Deep navy → sky blue as blue increases
+        const ar = Math.round(lerp(8,   0,   cur.blue))
+        const ag = Math.round(lerp(40,  100, cur.blue))
+        const ab = Math.round(lerp(130, 210, cur.blue))
+        gr.addColorStop(0,    `rgba(${ar},${ag},${ab},0)`)
+        gr.addColorStop(0.45, `rgba(${ar},${ag},${ab},${ambient.toFixed(3)})`)
+        gr.addColorStop(1,    `rgba(${ar},${ag},${ab},0)`)
         ctx.fillStyle = gr
         ctx.fillRect(0, 0, w, h)
       }
 
       // --- Dust layer: faint drifting motes around the ring, for depth.
-      ctx.fillStyle = 'rgba(190,212,240,1)'
+      ctx.fillStyle = 'rgba(30, 90, 180, 1)'
       for (let i = 0; i < dust.length; i++) {
         const d = dust[i]
         d.angle += d.speed * cur.speed * 0.6 * dt
@@ -300,28 +302,22 @@ export function ParticleRing({ state }: Props): JSX.Element {
           }
         }
 
-        // Triangle body with a slowly rotating metallic gradient.
+        // Pixel square — deep navy base on light bg, shifts toward sky blue by cur.blue.
+        // Hot/glint events flash to bright sky blue. No per-frame gradient allocation.
         ctx.save()
         ctx.translate(x, y)
         ctx.rotate(p.rotation)
         ctx.globalAlpha = bright
 
-        const ga = time * 0.013 + p.shimmerPhase * 3
-        const gx = Math.cos(ga) * size
-        const gy = Math.sin(ga) * size
-        const grad = ctx.createLinearGradient(-gx, -gy, gx, gy)
         const hot = Math.min(1, spec + p.glint)
-        grad.addColorStop(0, '#ffffff')
-        grad.addColorStop(0.45, hot > 0.4 ? '#eef7ff' : '#cfe2f4')
-        grad.addColorStop(1, `rgb(${Math.round(lerp(126, 96, cur.blue))},${Math.round(lerp(156, 142, cur.blue))},${Math.round(lerp(196, 226, cur.blue))})`)
-        ctx.fillStyle = grad
+        // idle (blue=0.25): deep navy rgb(~9,~55,~150) → thinking (blue=1): sky rgb(0,125,215)
+        const cr = Math.round(lerp(lerp(12, 0,   cur.blue), 80,  hot * 0.45))
+        const cg = Math.round(lerp(lerp(50, 125, cur.blue), 170, hot * 0.55))
+        const cb = Math.round(lerp(lerp(145, 215, cur.blue), 255, hot * 0.25))
+        ctx.fillStyle = `rgb(${cr},${cg},${cb})`
 
-        ctx.beginPath()
-        ctx.moveTo(0, -size)
-        ctx.lineTo(size * 0.866, size * 0.5)
-        ctx.lineTo(-size * 0.866, size * 0.5)
-        ctx.closePath()
-        ctx.fill()
+        const sq = size * 1.35
+        ctx.fillRect(-sq / 2, -sq / 2, sq, sq)
         ctx.restore()
       }
 

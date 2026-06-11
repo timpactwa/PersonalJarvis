@@ -6,7 +6,15 @@ const execAsync = promisify(exec)
 // Only allow alphanumeric + spaces + dots + hyphens in app names
 const SAFE_NAME_RE = /^[a-zA-Z0-9 .\-_]+$/
 
-// Common Windows app aliases
+// Apps that only respond to their URI protocol, not `start "name"`.
+// Discord, Spotify, and Teams are installed per-user and not on PATH.
+const PROTOCOL_URIS: Record<string, string> = {
+  'discord': 'discord://',
+  'spotify': 'spotify:',
+  'teams': 'msteams:',
+}
+
+// Common Windows app aliases → executable name or protocol key
 const APP_ALIASES: Record<string, string> = {
   'vs code': 'code',
   'vscode': 'code',
@@ -31,7 +39,8 @@ const APP_ALIASES: Record<string, string> = {
   'excel': 'excel',
   'powerpoint': 'powerpnt',
   'outlook': 'outlook',
-  'teams': 'ms-teams',
+  'teams': 'teams',
+  'microsoft teams': 'teams',
   'task manager': 'taskmgr',
 }
 
@@ -39,6 +48,13 @@ export async function launchApp(appName: string): Promise<string> {
   if (!appName) throw new Error('App name is required')
   const normalized = appName.toLowerCase().trim()
   const resolved = APP_ALIASES[normalized] ?? normalized
+
+  // Protocol-URI apps (Discord, Spotify, Teams) are not on PATH
+  const protocolUri = PROTOCOL_URIS[resolved]
+  if (protocolUri) {
+    await execAsync(`start "" "${protocolUri}"`, { shell: 'cmd.exe' })
+    return `Launched ${appName}`
+  }
 
   if (!SAFE_NAME_RE.test(resolved)) {
     throw new Error(`Invalid app name: "${appName}"`)

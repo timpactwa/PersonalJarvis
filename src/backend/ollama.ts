@@ -95,12 +95,35 @@ export async function chat(
   let fullText = ''
 
   for (let step = 0; step < MAX_STEPS; step++) {
-    const res = await fetch(`${baseUrl}/api/chat`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ model, messages, tools, stream: false }),
-    })
-    if (!res.ok) throw new Error(`Ollama error ${res.status}: ${await res.text()}`)
+    const controller = new AbortController()
+    // 120s — llama3.1:8b is 4.9GB and first cold-start can take 60-90s to page into RAM
+    const timeoutId = setTimeout(() => controller.abort(), 120_000)
+
+    let res: Response
+    try {
+      res = await fetch(`${baseUrl}/api/chat`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ model, messages, tools, stream: false }),
+        signal: controller.signal,
+      })
+    } catch (err: unknown) {
+      clearTimeout(timeoutId)
+      if (err instanceof Error && err.name === 'AbortError') {
+        throw new Error(`Ollama timed out after 120s at ${baseUrl}. The model may still be loading into RAM — try again in a moment, or run: ollama serve`)
+      }
+      throw new Error(
+        `Cannot reach Ollama at ${baseUrl} — start it with: ollama serve\nDetails: ${String(err)}`
+      )
+    } finally {
+      clearTimeout(timeoutId)
+    }
+
+    if (!res.ok) {
+      const body = await res.text().catch(() => '')
+      throw new Error(`Ollama HTTP ${res.status} for model "${model}": ${body || '(no body)'}`)
+    }
+
     const data = await res.json() as OllamaResponse
     inputTokens += data.prompt_eval_count ?? 0
     outputTokens += data.eval_count ?? 0
@@ -134,5 +157,5 @@ export async function chat(
     broadcast({ type: 'transcript', role: 'assistant', text: fullText, partial: false })
   }
 
-  return { text: fullText, model: `ollama:${model}`, inputTokens, outputTokens, pendingMemory }
+  return { text: fullText, model: `ollama:${model}`, inputTokens, outputTokens, pendingMemory, pendingEntities: [] }
 }

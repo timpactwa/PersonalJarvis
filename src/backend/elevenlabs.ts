@@ -1,14 +1,18 @@
 import { getSettings } from './memory/settings'
 
-const ELEVENLABS_API_KEY = process.env.ELEVENLABS_API_KEY ?? ''
-const DEFAULT_VOICE_ID = process.env.ELEVENLABS_VOICE_ID ?? 'pqHfZKP75CvOlQylNhV4'
-
+// NOTE: read env *lazily* inside the functions below. dotenv's config() runs in
+// the body of backend/index.ts, which (per ESM import hoisting) executes AFTER
+// this module's top-level code. Capturing process.env here at import time would
+// always read an empty string and make synthesize() throw even with a valid key.
 function resolveVoiceId(): string {
-  try { return getSettings().voiceId || DEFAULT_VOICE_ID } catch { return DEFAULT_VOICE_ID }
+  // .env.local takes priority; DB setting is the fallback for UI-based changes
+  if (process.env.ELEVENLABS_VOICE_ID) return process.env.ELEVENLABS_VOICE_ID
+  try { return getSettings().voiceId || 'pqHfZKP75CvOlQylNhV4' } catch { return 'pqHfZKP75CvOlQylNhV4' }
 }
 
 export async function synthesize(text: string): Promise<Buffer> {
-  if (!ELEVENLABS_API_KEY) {
+  const apiKey = process.env.ELEVENLABS_API_KEY ?? ''
+  if (!apiKey || apiKey === 'your_key_from_elevenlabs') {
     throw new Error('ELEVENLABS_API_KEY not set in .env.local')
   }
 
@@ -18,13 +22,14 @@ export async function synthesize(text: string): Promise<Buffer> {
     {
       method: 'POST',
       headers: {
-        'xi-api-key': ELEVENLABS_API_KEY,
+        'xi-api-key': apiKey,
         'Content-Type': 'application/json',
       },
       body: JSON.stringify({
         text,
-        model_id: 'eleven_monolingual_v1',
+        model_id: 'eleven_turbo_v2_5',
         voice_settings: { stability: 0.4, similarity_boost: 0.85 },
+        speed: 1.8,
       }),
     }
   )

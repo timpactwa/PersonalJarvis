@@ -36,6 +36,7 @@ export default defineConfig({
         '@xenova/transformers',
         'googleapis',
         'google-auth-library',
+        '@ffmpeg-installer/ffmpeg',
       ],
     },
   },

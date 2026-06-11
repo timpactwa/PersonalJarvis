@@ -1,20 +1,28 @@
-import { pipeline } from '@xenova/transformers'
 import { join } from 'path'
 
 // Cache model in resources/ directory
 const MODEL_CACHE = join(process.cwd(), 'resources')
 
-let embedder: Awaited<ReturnType<typeof pipeline>> | null = null
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+let embedder: any = null
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+let embedderPromise: Promise<any> | null = null
 
-async function getEmbedder(): Promise<Awaited<ReturnType<typeof pipeline>>> {
-  if (!embedder) {
-    console.log('[embeddings] loading model (first run downloads ~80MB)...')
-    embedder = await pipeline('feature-extraction', 'Xenova/all-MiniLM-L6-v2', {
-      cache_dir: MODEL_CACHE,
-    })
-    console.log('[embeddings] model ready')
+async function getEmbedder(): Promise<any> {
+  if (embedder) return embedder
+  if (!embedderPromise) {
+    embedderPromise = (async () => {
+      const dynamicImport = new Function('specifier', 'return import(specifier)')
+      const { pipeline } = await dynamicImport('@xenova/transformers')
+      console.log('[embeddings] loading model (first run downloads ~80MB)...')
+      embedder = await pipeline('feature-extraction', 'Xenova/all-MiniLM-L6-v2', {
+        cache_dir: MODEL_CACHE,
+      })
+      console.log('[embeddings] model ready')
+      return embedder
+    })()
   }
-  return embedder
+  return embedderPromise
 }
 
 export async function embed(text: string): Promise<Float32Array> {

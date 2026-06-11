@@ -16,27 +16,49 @@ describe('gmail tools', () => {
     }
   })
 
-  it('exposes gmail_search and gmail_read tools', async () => {
+  it('exposes gmail_search and gmail_read tools for inline email queries', async () => {
     const { gmailToolDefs } = await import('../../../src/backend/tools/gmail')
     const names = gmailToolDefs.map(t => t.name)
     expect(names).toContain('gmail_search')
     expect(names).toContain('gmail_read')
   })
 
-  it('exposes gmail_send and gmail_draft tools', async () => {
+  it('exposes gmail_compose for authoring emails (replaces send/draft)', async () => {
     const { gmailToolDefs } = await import('../../../src/backend/tools/gmail')
     const names = gmailToolDefs.map(t => t.name)
-    expect(names).toContain('gmail_send')
-    expect(names).toContain('gmail_draft')
+    expect(names).toContain('gmail_compose')
   })
 
-  it('gmail_send queues a confirmation instead of sending immediately', async () => {
-    const { clearPending, hasPending } = await import('../../../src/backend/confirm')
+  it('exposes gmail_browse for viewing emails in the popup viewer', async () => {
+    const { gmailToolDefs } = await import('../../../src/backend/tools/gmail')
+    const names = gmailToolDefs.map(t => t.name)
+    expect(names).toContain('gmail_browse')
+  })
+
+  it('gmail_compose triggers email_compose popup (does not send immediately)', async () => {
+    const { emitEvent } = await import('../../../src/backend/events')
+    const seen: unknown[] = []
+    const { setEmitter } = await import('../../../src/backend/events')
+    setEmitter(e => seen.push(e))
+
     const { handleGmailTool } = await import('../../../src/backend/tools/gmail')
-    clearPending()
-    const reply = await handleGmailTool('gmail_send', { to: 'a@b.com', subject: 'Hi', body: 'There' })
-    expect(reply.toLowerCase()).toContain('shall i send')
-    expect(hasPending()).toBe(true)
-    clearPending()
+    const reply = await handleGmailTool('gmail_compose', {
+      to: 'a@b.com', subject: 'Hi', body: 'There',
+    })
+    expect(reply.toLowerCase()).toMatch(/composer|email|opened|popup/i)
+    const composeEvent = seen.find((e: any) => e.type === 'email_compose')
+    expect(composeEvent).toBeDefined()
+  })
+
+  it('exports calendarToolDefs with calendar_list and calendar_create', async () => {
+    const { calendarToolDefs } = await import('../../../src/backend/tools/gmail')
+    const names = calendarToolDefs.map(t => t.name)
+    expect(names).toContain('calendar_list')
+    expect(names).toContain('calendar_create')
+  })
+
+  it('handleGmailTool throws for unknown tool name', async () => {
+    const { handleGmailTool } = await import('../../../src/backend/tools/gmail')
+    await expect(handleGmailTool('gmail_send', {})).rejects.toThrow('Unknown tool')
   })
 })

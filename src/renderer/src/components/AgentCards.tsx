@@ -41,34 +41,34 @@ function AgentCard({ agent, onClose }: { agent: AgentInfo; onClose: (id: string)
       style={{
         width: 260,
         flex: '0 0 auto',
-        background: 'rgba(6, 11, 20, 0.92)',
-        border: `1px solid ${STATUS_COLOR[agent.status]}55`,
+        background: 'rgba(255, 255, 255, 0.88)',
+        border: `1px solid ${STATUS_COLOR[agent.status]}66`,
         borderRadius: 8,
         padding: 14,
         fontFamily: '"Orbitron", monospace',
-        color: '#7dd3fc',
+        color: 'var(--accent)',
         backdropFilter: 'blur(10px)',
-        boxShadow: `0 0 20px ${STATUS_COLOR[agent.status]}22`,
+        boxShadow: `0 4px 16px rgba(3,80,140,0.1)`,
       }}
     >
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}>
-        <span style={{ fontSize: 12, fontWeight: 700, color: '#e0f2fe' }}>{agent.name}</span>
+        <span style={{ fontSize: 12, fontWeight: 700, color: '#0a2540' }}>{agent.name}</span>
         <span style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
           <span style={{ fontSize: 9, color: STATUS_COLOR[agent.status], letterSpacing: '0.1em' }}>
             {agent.status.toUpperCase()}
           </span>
           <button
             onClick={() => onClose(agent.id)}
-            style={{ background: 'none', border: 'none', color: '#4a6a8a', cursor: 'pointer', fontSize: 12 }}
+            style={{ background: 'none', border: 'none', color: 'var(--text-mid)', cursor: 'pointer', fontSize: 12 }}
           >✕</button>
         </span>
       </div>
-      <div style={{ fontFamily: '"Share Tech Mono", monospace', fontSize: 10, color: '#94a3b8', marginBottom: 8 }}>
+      <div style={{ fontFamily: '"Share Tech Mono", monospace', fontSize: 10, color: 'var(--text-mid)', marginBottom: 8 }}>
         {agent.task}
       </div>
       <div
         onClick={() => setExpanded(e => !e)}
-        style={{ fontFamily: '"Share Tech Mono", monospace', fontSize: 11, color: '#7dd3fc', cursor: 'pointer' }}
+        style={{ fontFamily: '"Share Tech Mono", monospace', fontSize: 11, color: 'var(--accent)', cursor: 'pointer' }}
       >
         {expanded
           ? agent.actions.map((act, i) => <div key={i} style={{ marginBottom: 4 }}>› {act}</div>)

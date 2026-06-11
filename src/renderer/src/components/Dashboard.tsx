@@ -24,16 +24,16 @@ export function Dashboard({ open, onClose, tokensToday, costToday, model, daily,
     left: '50%',
     transform: 'translate(-50%, -50%)',
     width: '480px',
-    background: 'rgba(6, 11, 20, 0.92)',
-    border: '1px solid rgba(125, 211, 252, 0.2)',
-    borderRadius: '8px',
+    background: 'rgba(255, 255, 255, 0.94)',
+    border: '1px solid rgba(3, 105, 161, 0.15)',
+    borderRadius: '12px',
     padding: '32px',
-    fontFamily: '"Orbitron", monospace',
-    color: '#7dd3fc',
-    backdropFilter: 'blur(12px)',
-    boxShadow: '0 0 40px rgba(59, 130, 246, 0.15), inset 0 0 60px rgba(59, 130, 246, 0.03)',
+    fontFamily: 'var(--font-hud)',
+    color: 'var(--text)',
+    backdropFilter: 'blur(20px)',
+    boxShadow: '0 8px 40px rgba(3, 80, 140, 0.14), 0 2px 8px rgba(3, 80, 140, 0.06)',
     zIndex: 100,
-    animation: 'dashboardIn 0.3s ease-out',
+    animation: 'dashboardIn 0.25s cubic-bezier(0.16, 1, 0.3, 1)',
   }
 
   const row: React.CSSProperties = {
@@ -41,22 +41,24 @@ export function Dashboard({ open, onClose, tokensToday, costToday, model, daily,
     justifyContent: 'space-between',
     alignItems: 'center',
     padding: '14px 0',
-    borderBottom: '1px solid rgba(125, 211, 252, 0.08)',
+    borderBottom: '1px solid rgba(3, 105, 161, 0.07)',
     fontSize: '11px',
     letterSpacing: '0.1em',
+    color: 'var(--text-mid)',
   }
 
   const val: React.CSSProperties = {
-    color: '#e0f2fe',
+    color: '#0a2540',
     fontSize: '15px',
     fontWeight: 700,
-    textShadow: '0 0 8px rgba(125, 211, 252, 0.3)',
+    fontFamily: 'var(--font-data)',
+    letterSpacing: '0.05em',
   }
 
   const divider: React.CSSProperties = {
     width: '100%',
     height: '1px',
-    background: 'linear-gradient(90deg, transparent, rgba(125,211,252,0.3), transparent)',
+    background: 'linear-gradient(90deg, transparent, rgba(3,105,161,0.25), transparent)',
     margin: '4px 0',
   }
 
@@ -68,7 +70,8 @@ export function Dashboard({ open, onClose, tokensToday, costToday, model, daily,
         style={{
           position: 'absolute',
           inset: 0,
-          background: 'rgba(0, 0, 0, 0.3)',
+          background: 'rgba(200, 220, 240, 0.25)',
+          backdropFilter: 'blur(2px)',
           zIndex: 99,
         }}
       />
@@ -77,7 +80,7 @@ export function Dashboard({ open, onClose, tokensToday, costToday, model, daily,
       <div style={panelStyle} className="no-drag" id="dashboard-panel">
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '20px' }}>
           <div>
-            <span style={{ fontSize: '13px', fontWeight: 700, letterSpacing: '0.15em' }}>SYSTEM DASHBOARD</span>
+            <span style={{ fontSize: '13px', fontWeight: 700, letterSpacing: '0.15em', color: 'var(--text)' }}>SYSTEM DASHBOARD</span>
             <div style={divider} />
           </div>
           <button
@@ -85,8 +88,8 @@ export function Dashboard({ open, onClose, tokensToday, costToday, model, daily,
             id="dashboard-close"
             style={{
               background: 'none',
-              border: '1px solid rgba(125, 211, 252, 0.15)',
-              color: '#7dd3fc',
+              border: '1px solid rgba(3,105,161,0.18)',
+              color: 'var(--accent)',
               cursor: 'pointer',
               fontSize: '12px',
               padding: '4px 10px',
@@ -96,11 +99,11 @@ export function Dashboard({ open, onClose, tokensToday, costToday, model, daily,
               transition: 'all 0.2s',
             }}
             onMouseEnter={e => {
-              e.currentTarget.style.borderColor = 'rgba(125, 211, 252, 0.5)'
-              e.currentTarget.style.background = 'rgba(125, 211, 252, 0.08)'
+              e.currentTarget.style.borderColor = 'rgba(3,105,161,0.45)'
+              e.currentTarget.style.background = 'rgba(3,105,161,0.07)'
             }}
             onMouseLeave={e => {
-              e.currentTarget.style.borderColor = 'rgba(125, 211, 252, 0.15)'
+              e.currentTarget.style.borderColor = 'rgba(3,105,161,0.18)'
               e.currentTarget.style.background = 'none'
             }}
           >✕</button>
@@ -120,19 +123,19 @@ export function Dashboard({ open, onClose, tokensToday, costToday, model, daily,
         </div>
         <div style={row}>
           <span>MEMORY SYSTEM</span>
-          <span style={{ ...val, color: '#4ade80' }}>ACTIVE</span>
+          <span style={{ ...val, color: '#16a34a' }}>ACTIVE</span>
         </div>
         <div style={{ ...row, borderBottom: 'none' }}>
           <span>STATUS</span>
-          <span style={{ ...val, color: '#4ade80' }}>
+          <span style={{ ...val, color: '#16a34a' }}>
             <span style={{
               display: 'inline-block',
               width: '6px',
               height: '6px',
               borderRadius: '50%',
-              background: '#4ade80',
+              background: '#16a34a',
               marginRight: '8px',
-              boxShadow: '0 0 8px #4ade80',
+              boxShadow: '0 0 6px rgba(22,163,74,0.5)',
             }} />
             OPERATIONAL
           </span>
@@ -145,18 +148,27 @@ export function Dashboard({ open, onClose, tokensToday, costToday, model, daily,
           className="no-drag"
           style={{
             marginTop: 18, width: '100%', background: 'none',
-            border: '1px solid rgba(125,211,252,0.2)', color: '#7dd3fc',
+            border: '1px solid rgba(3,105,161,0.2)', color: 'var(--accent)',
             cursor: 'pointer', fontFamily: '"Orbitron", monospace', fontSize: 11,
             letterSpacing: '0.12em', padding: '8px 0', borderRadius: 4,
+            transition: 'background 0.15s, border-color 0.15s',
+          }}
+          onMouseEnter={e => {
+            e.currentTarget.style.background = 'rgba(3,105,161,0.07)'
+            e.currentTarget.style.borderColor = 'rgba(3,105,161,0.4)'
+          }}
+          onMouseLeave={e => {
+            e.currentTarget.style.background = 'none'
+            e.currentTarget.style.borderColor = 'rgba(3,105,161,0.2)'
           }}
         >OPEN SETTINGS</button>
 
         <div style={{
           marginTop: '20px',
           paddingTop: '16px',
-          borderTop: '1px solid rgba(125, 211, 252, 0.08)',
+          borderTop: '1px solid rgba(3, 105, 161, 0.07)',
           fontSize: '9px',
-          color: '#4a6a8a',
+          color: 'var(--text-dim)',
           letterSpacing: '0.12em',
           textAlign: 'center',
         }}>
