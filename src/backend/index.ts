@@ -45,10 +45,13 @@ import { chat as chatOllama } from './ollama'
 // If Claude rate-limits, Groq catches it.
 const TOOL_KEYWORDS_ROUTE = [
   'email', 'gmail', 'calendar', 'file', 'folder', 'search', 'send', 'find',
-  'launch', 'open', 'read', 'write', 'spotify', 'chrome', 'discord', 'vscode',
+  'launch', 'open', 'read', 'write', 'spotify', 'chrome', 'discord', 'vscode', 'rivals',
   'code', 'terminal', 'powershell', 'download', 'upload', 'run', 'execute',
   // web search triggers
   'web', 'internet', 'weather', 'news', 'research', 'google',
+  // self-configuration / usage
+  'settings', 'provider', 'voice', 'configure', 'spending', 'usage', 'cost', 'rate limit',
+  'command', 'teach',
   // preference/memory triggers → keep on Claude for entity extraction
   // 'remember' intentionally excluded here so those queries use Claude
 ]
@@ -143,8 +146,18 @@ import { embed, findTopK } from './memory/embeddings'
 import { resolveConfirmation, hasPending, getLatestPending } from './confirm'
 import { sendEmailNow, createDraft, createCalendarEvent } from './tools/gmail'
 import { upsertEntity, findMentionedEntities, getPreferenceSummary } from './memory/db'
+import {
+  applyContactEmailHints,
+  extractContactEmailHints,
+  extractEmailFromText,
+  formatEntityContext,
+  parseContactsFromUserMessage,
+} from './memory/contacts'
+import { stripResponseTags } from './responseTags'
+import { markComposeCompleted, markComposeDismissed, clearComposeSuppression } from './toolSession'
 import { closeAgent } from './agents'
 import { getSettings, setSettings } from './memory/settings'
+import { upsertCustomCommand, deleteCustomCommand } from './memory/customCommands'
 import {
   initCapture,
   startCapture,
@@ -249,6 +262,7 @@ async function sendDiagnostics(): Promise<void> {
 }
 
 wss.on('connection', (ws: WebSocket) => {
+  clearComposeSuppression()
   _activeWs = ws
   console.log('[backend] renderer connected')
 
@@ -324,10 +338,41 @@ function handleRendererEvent(event: RendererEvent): void {
     })()
     return
   }
+  if (event.type === 'email_compose_dismissed') {
+    markComposeDismissed(event.draft.to, event.draft.subject, event.draft.id)
+    return
+  }
+  if (event.type === 'command_compose_dismissed') {
+    return
+  }
+  if (event.type === 'command_save') {
+    void (async () => {
+      try {
+        const saved = upsertCustomCommand(event.draft)
+        const triggers = saved.aliases.join(', ')
+        const msg = `Saved launch command "${saved.label}". Say "${triggers.split(',')[0]}" to open it.`
+        broadcast({ type: 'transcript', role: 'assistant', text: msg, partial: false })
+        await speakOrIdle(msg)
+      } catch (err) {
+        broadcast({ type: 'error', message: String(err) })
+        broadcast({ type: 'state', state: 'idle' })
+      }
+    })()
+    return
+  }
+  if (event.type === 'command_delete') {
+    try {
+      deleteCustomCommand(event.id)
+    } catch (err) {
+      broadcast({ type: 'error', message: String(err) })
+    }
+    return
+  }
   if (event.type === 'email_send') {
     void (async () => {
       try {
         const { to, subject, body, cc, bcc } = event.draft
+        markComposeCompleted(to, subject, event.draft.id)
         const result = await sendEmailNow(to, subject, body, cc, bcc)
         broadcast({ type: 'transcript', role: 'assistant', text: result, partial: false })
         await speakOrIdle(result)
@@ -342,6 +387,7 @@ function handleRendererEvent(event: RendererEvent): void {
     void (async () => {
       try {
         const { to, subject, body, cc, bcc } = event.draft
+        markComposeCompleted(to, subject, event.draft.id)
         const result = await createDraft(to, subject, body, cc, bcc)
         broadcast({ type: 'transcript', role: 'assistant', text: result, partial: false })
         await speakOrIdle(result)
@@ -542,6 +588,27 @@ async function runConversation(userText: string): Promise<void> {
     }
   }
 
+  const bulkContacts = parseContactsFromUserMessage(userText)
+  if (bulkContacts.length > 0) {
+    for (const c of bulkContacts) {
+      upsertEntity(c.name, 'person', c.relationship, c.context, [], c.email)
+      console.log(`[contacts] saved ${c.name} (${c.email})`)
+      try {
+        const mem = `${c.name}'s email is ${c.email}`
+        const vec = await embed(mem)
+        insertMemory(mem, vec)
+      } catch { /* non-critical */ }
+    }
+    const reply = bulkContacts.length === 1
+      ? `Got it — I've saved ${bulkContacts[0].name} (${bulkContacts[0].email}).`
+      : `Got it — I've saved ${bulkContacts.map(c => c.name).join(' and ')}.`
+    conversationHistory.push({ role: 'user', content: userText })
+    conversationHistory.push({ role: 'assistant', content: reply })
+    broadcast({ type: 'transcript', role: 'assistant', text: reply, partial: false })
+    await speakOrIdle(reply)
+    return
+  }
+
   const lower = userText.toLowerCase()
   if (lower.includes('show dashboard') || lower.includes('open dashboard')) {
     const stats = getStatsToday()
@@ -567,11 +634,26 @@ async function runConversation(userText: string): Promise<void> {
     const prefs = getPreferenceSummary()
     if (prefs) topMems.push(prefs)
 
-    // Entity injection — find people/places/projects mentioned by name
+    // Link contact emails stated explicitly (e.g. "that's my mom's email")
+    if (applyContactEmailHints(userText, conversationHistory)) {
+      const hint = extractContactEmailHints(userText, conversationHistory)
+      if (hint) {
+        topMems.push(`${hint.contactRef}'s email: ${hint.email}`)
+        try {
+          const mem = `${hint.contactRef}'s email is ${hint.email}`
+          const vec = await embed(mem)
+          insertMemory(mem, vec)
+          console.log(`[memory] saved contact email: "${mem}"`)
+        } catch (err) {
+          console.error('[memory] contact email save error:', err)
+        }
+      }
+    }
+
+    // Entity injection — find people/places/projects mentioned by name or relationship
     const mentioned = findMentionedEntities(userText)
     for (const entity of mentioned) {
-      const rel = entity.relationship ? ` (${entity.relationship})` : ''
-      topMems.push(`${entity.name}${rel}: ${entity.context}`)
+      topMems.push(formatEntityContext(entity))
     }
     // Semantic memory retrieval
     const queryVec = await embed(userText)
@@ -591,10 +673,13 @@ async function runConversation(userText: string): Promise<void> {
     broadcast,
   )
 
-  console.log(`[pipeline] jarvis (${model}): "${text.slice(0, 80)}..."`)
+  const cleaned = stripResponseTags(text)
+  const finalText = cleaned.text
+
+  console.log(`[pipeline] jarvis (${model}): "${finalText.slice(0, 80)}..."`)
 
   conversationHistory.push({ role: 'user', content: userText })
-  conversationHistory.push({ role: 'assistant', content: text })
+  conversationHistory.push({ role: 'assistant', content: finalText })
   while (conversationHistory.length > 40) {
     conversationHistory.splice(0, 2)
   }
@@ -609,13 +694,24 @@ async function runConversation(userText: string): Promise<void> {
     }
   }
 
-  for (const entity of pendingEntities) {
+  const entitiesToSave = pendingEntities.length > 0 ? pendingEntities : cleaned.pendingEntities
+  for (const entity of entitiesToSave) {
     try {
-      upsertEntity(entity.name, entity.type, entity.relationship, entity.context, entity.aliases)
-      console.log(`[entities] saved ${entity.type}: "${entity.name}"`)
+      const email = entity.email?.trim()
+        || extractEmailFromText(entity.context)
+        || ''
+      upsertEntity(entity.name, entity.type, entity.relationship, entity.context, entity.aliases, email)
+      console.log(`[entities] saved ${entity.type}: "${entity.name}"${email ? ` (${email})` : ''}`)
     } catch (err) {
       console.error('[entities] save error:', err)
     }
+  }
+
+  if (cleaned.pendingMemory && !pendingMemory) {
+    try {
+      const vec = await embed(cleaned.pendingMemory)
+      insertMemory(cleaned.pendingMemory, vec)
+    } catch { /* non-critical */ }
   }
 
   try {
@@ -629,7 +725,11 @@ async function runConversation(userText: string): Promise<void> {
     broadcast({ type: 'stats', tokensToday: stats.tokens, costToday: stats.cost, model })
   } catch { /* ignore */ }
 
-  await speakOrIdle(text)
+  if (finalText !== text) {
+    broadcast({ type: 'transcript', role: 'assistant', text: finalText, partial: false })
+  }
+
+  await speakOrIdle(finalText)
 }
 
 function handlePttStart(): void {
