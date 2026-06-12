@@ -137,7 +137,7 @@ function chat(
   return chatOllama(userText, history, memories, broadcast)
 }
 import { synthesize } from './elevenlabs'
-import { initDb, closeDb, isDbAvailable, getDbError, getUsageDaily, getUsageByModel, getAllMemories, insertMemory } from './memory/db'
+import { initDb, closeDb, isDbAvailable, getDbError, getUsageDaily, getUsageByModel, getAllMemories, insertMemory, deleteMemory } from './memory/db'
 import { logApiCall, getStatsToday } from './memory/logger'
 import { embed, findTopK } from './memory/embeddings'
 import { resolveConfirmation, hasPending, getLatestPending } from './confirm'
@@ -391,6 +391,25 @@ function handleRendererEvent(event: RendererEvent): void {
     } catch { /* ignore */ }
     if (updated.llmProvider) {
       console.error('[backend] LLM provider changed to:', updated.llmProvider)
+    }
+    return
+  }
+  if (event.type === 'get_memories') {
+    try {
+      const mems = getAllMemories().map(m => ({ id: m.id, text: m.text, createdAt: m.timestamp }))
+      broadcast({ type: 'memories', memories: mems })
+    } catch (err) {
+      broadcast({ type: 'error', message: String(err) })
+    }
+    return
+  }
+  if (event.type === 'delete_memory') {
+    try {
+      deleteMemory(event.id)
+      const mems = getAllMemories().map(m => ({ id: m.id, text: m.text, createdAt: m.timestamp }))
+      broadcast({ type: 'memories', memories: mems })
+    } catch (err) {
+      broadcast({ type: 'error', message: String(err) })
     }
     return
   }

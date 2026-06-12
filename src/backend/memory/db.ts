@@ -254,12 +254,18 @@ export function insertMemory(text: string, embedding: Float32Array): void {
   `).run(Date.now(), text, Buffer.from(embedding.buffer))
 }
 
-export function getAllMemories(): Array<{ id: number; text: string; embedding: Float32Array }> {
+export function getAllMemories(): Array<{ id: number; text: string; timestamp: number; embedding: Float32Array }> {
   if (!dbAvailable) return []
-  const rows = getDb().prepare('SELECT id, text, embedding FROM memories').all() as Array<{ id: number; text: string; embedding: Buffer }>
+  const rows = getDb().prepare('SELECT id, text, timestamp, embedding FROM memories ORDER BY timestamp DESC').all() as Array<{ id: number; text: string; timestamp: number; embedding: Buffer }>
   return rows.map(r => ({
     id: r.id,
     text: r.text,
+    timestamp: r.timestamp,
     embedding: new Float32Array(r.embedding.buffer, r.embedding.byteOffset, r.embedding.length / 4),
   }))
+}
+
+export function deleteMemory(id: number): void {
+  if (!dbAvailable) return
+  getDb().prepare('DELETE FROM memories WHERE id = ?').run(id)
 }
