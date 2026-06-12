@@ -2,6 +2,7 @@ import { useCallback, useEffect, useState } from 'react'
 import { useWebSocket } from './hooks/useWebSocket'
 import { useAnimState } from './hooks/useAnimState'
 import { ParticleRing } from './components/ParticleRing'
+import { rmsFromBytes } from './lib/rms'
 import { HudOverlay } from './components/HudOverlay'
 import { Transcript } from './components/Transcript'
 import { TextInput } from './components/TextInput'
@@ -34,12 +35,40 @@ export default function App(): JSX.Element {
       // Playback drives speaking→idle; the backend no longer sends timed
       // state events around TTS, so the UI unlocks the moment audio ends.
       handleEvent({ type: 'state', state: 'speaking' })
+
+      let ctx: AudioContext | null = null
+      let raf = 0
+      try {
+        ctx = new AudioContext()
+        const src = ctx.createMediaElementSource(audio)
+        const analyser = ctx.createAnalyser()
+        analyser.fftSize = 512
+        src.connect(analyser)
+        analyser.connect(ctx.destination)
+        const buf = new Uint8Array(analyser.fftSize)
+        const tick = (): void => {
+          analyser.getByteTimeDomainData(buf)
+          setAmplitude(rmsFromBytes(buf))
+          raf = requestAnimationFrame(tick)
+        }
+        tick()
+      } catch (err) {
+        console.error('[meter] tts meter error:', err)
+      }
+
+      const cleanup = (): void => {
+        cancelAnimationFrame(raf)
+        void ctx?.close()
+        setAmplitude(0)
+      }
       audio.onended = () => {
         URL.revokeObjectURL(url)
+        cleanup()
         handleEvent({ type: 'state', state: 'idle' })
       }
       audio.play().catch(err => {
         console.error('[audio] playback error:', err)
+        cleanup()
         handleEvent({ type: 'state', state: 'idle' })
       })
     }
@@ -50,17 +79,48 @@ export default function App(): JSX.Element {
   // Backend lifecycle status from the main process — lets the UI distinguish
   // "still starting" from "crashed/failed" instead of spinning forever.
   const [backendStatus, setBackendStatus] = useState<{ status: string; message?: string } | null>(null)
+  const [amplitude, setAmplitude] = useState(0)
   useEffect(() => {
     ;(window as any).jarvis.onBackendStatus?.((s: { status: string; message?: string }) => setBackendStatus(s))
   }, [])
 
   useEffect(() => {
-    ;(window as any).jarvis.onPttStart(() => {
-      console.log('[ptt] ptt-start (backend captures audio)')
-    })
-    ;(window as any).jarvis.onPttStop(() => {
-      console.log('[ptt] ptt-stop (backend processes audio)')
-    })
+    let ctx: AudioContext | null = null
+    let raf = 0
+    let stream: MediaStream | null = null
+
+    const startMeter = async (): Promise<void> => {
+      try {
+        stream = await navigator.mediaDevices.getUserMedia({ audio: true })
+        ctx = new AudioContext()
+        const src = ctx.createMediaStreamSource(stream)
+        const analyser = ctx.createAnalyser()
+        analyser.fftSize = 512
+        src.connect(analyser)
+        const buf = new Uint8Array(analyser.fftSize)
+        const tick = (): void => {
+          analyser.getByteTimeDomainData(buf)
+          setAmplitude(rmsFromBytes(buf))
+          raf = requestAnimationFrame(tick)
+        }
+        tick()
+      } catch (err) {
+        console.error('[meter] mic meter error:', err)
+      }
+    }
+
+    const stopMeter = (): void => {
+      cancelAnimationFrame(raf)
+      stream?.getTracks().forEach(t => t.stop())
+      void ctx?.close()
+      ctx = null; stream = null
+      setAmplitude(0)
+    }
+
+    ;(window as any).jarvis.onPttStart(() => { void startMeter() })
+    ;(window as any).jarvis.onPttStop(() => { stopMeter() })
+
+    return () => { stopMeter() }
   }, [])
 
   useEffect(() => {
@@ -85,7 +145,7 @@ export default function App(): JSX.Element {
 
   return (
     <div style={{ width: '100vw', height: '100vh', background: '#ddefff', position: 'relative' }}>
-      <ParticleRing state={state.anim} />
+      <ParticleRing state={state.anim} amplitude={amplitude} />
       <div className="grid-bg" />
       <TitleBar />
       <ListeningIndicator state={state.anim} />
