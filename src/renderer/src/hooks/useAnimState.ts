@@ -1,5 +1,5 @@
 import { useState, useCallback } from 'react'
-import type { AnimState, BackendEvent, AgentInfo, Settings, UsagePoint, ModelUsage, EmailDraft, EmailMessage, CalendarEventDraft, MemoryEntry, CustomCommandDraft } from '../../../backend/types'
+import type { AnimState, BackendEvent, AgentInfo, Settings, UsagePoint, ModelUsage, EmailDraft, EmailMessage, CalendarEventDraft, MemoryEntry, CustomCommandDraft, GithubRow } from '../../../backend/types'
 
 export interface PendingConfirm {
   id: string
@@ -42,6 +42,12 @@ export interface JarvisState {
   commandDraft: CustomCommandDraft | null
   imageAttached: boolean
   reportContent: { format: 'html' | 'md'; content: string } | null
+  spotifyOpen: boolean
+  githubOpen: boolean
+  quietMode: boolean
+  spotifyNowPlaying: { track?: string; artist?: string; isPlaying: boolean } | null
+  githubData: { tab: 'STATUS' | 'PRs' | 'ISSUES' | 'COMMITS'; rows: GithubRow[] } | null
+  planPreview: { id: string; steps: string[] } | null
 }
 
 const initial: JarvisState = {
@@ -71,6 +77,12 @@ const initial: JarvisState = {
   commandDraft: null,
   imageAttached: false,
   reportContent: null,
+  spotifyOpen: false,
+  githubOpen: false,
+  quietMode: false,
+  spotifyNowPlaying: null,
+  githubData: null,
+  planPreview: null,
 }
 
 export function useAnimState() {
@@ -91,8 +103,14 @@ export function useAnimState() {
           }
           const turn: ConversationTurn = { id: Date.now() + Math.random(), role: event.role, text: event.text }
           const history = [...prev.history, turn].slice(-10)
-          if (event.role === 'user') return { ...prev, userText: event.text, assistantText: '', history, streamingText: null }
-          return { ...prev, assistantText: event.text, history, streamingText: null }
+          // A final transcript means the pending image has been consumed by a
+          // conversation turn — clear the indicator. The backend's own
+          // "Image attached" confirmation must NOT clear it, or the flag would
+          // vanish the instant it was set.
+          const isAttachConfirm = event.role === 'assistant' && event.text.startsWith('Image attached')
+          const imageAttached = isAttachConfirm ? prev.imageAttached : false
+          if (event.role === 'user') return { ...prev, userText: event.text, assistantText: '', history, streamingText: null, imageAttached }
+          return { ...prev, assistantText: event.text, history, streamingText: null, imageAttached }
         }
         case 'error':
           return { ...prev, errorText: event.message, anim: 'idle' }
@@ -120,7 +138,7 @@ export function useAnimState() {
         case 'usage':
           return { ...prev, usageDaily: event.daily, usageByModel: event.byModel }
         case 'settings':
-          return { ...prev, settings: event.settings }
+          return { ...prev, settings: event.settings, quietMode: event.settings.quietMode ?? false }
         case 'email_compose':
           return { ...prev, compose: event.draft }
         case 'email_view':
@@ -135,6 +153,18 @@ export function useAnimState() {
           return { ...prev, commandDraft: event.draft }
         case 'report':
           return { ...prev, reportContent: { format: event.format, content: event.content } }
+        case 'panel_open':
+          if (event.panel === 'spotify') return { ...prev, spotifyOpen: true }
+          if (event.panel === 'github') return { ...prev, githubOpen: true }
+          return prev
+        case 'quiet_mode_changed':
+          return { ...prev, quietMode: event.enabled }
+        case 'spotify_now_playing':
+          return { ...prev, spotifyNowPlaying: { track: event.track, artist: event.artist, isPlaying: event.isPlaying } }
+        case 'github_data':
+          return { ...prev, githubData: { tab: event.tab, rows: event.rows } }
+        case 'plan_preview':
+          return { ...prev, planPreview: { id: event.id, steps: event.steps } }
         default:
           return prev
       }
@@ -153,6 +183,10 @@ export function useAnimState() {
   const dismissToast = useCallback((id: number) => setState(prev => ({ ...prev, toasts: prev.toasts.filter(t => t.id !== id) })), [])
   const closeCommand = useCallback(() => setState(prev => ({ ...prev, commandDraft: null })), [])
   const clearReport = useCallback(() => setState(prev => ({ ...prev, reportContent: null })), [])
+  const setImageAttached = useCallback((v: boolean) => setState(prev => ({ ...prev, imageAttached: v })), [])
+  const toggleSpotify = useCallback(() => setState(prev => ({ ...prev, spotifyOpen: !prev.spotifyOpen })), [])
+  const toggleGithub = useCallback(() => setState(prev => ({ ...prev, githubOpen: !prev.githubOpen })), [])
+  const closePlanPreview = useCallback(() => setState(prev => ({ ...prev, planPreview: null })), [])
 
-  return { state, handleEvent, toggleDashboard, toggleSettings, clearError, closeCompose, closeViewer, openCompose, closeEvent, toggleTextVisible, toggleMemories, dismissToast, closeCommand, clearReport }
+  return { state, handleEvent, toggleDashboard, toggleSettings, clearError, closeCompose, closeViewer, openCompose, closeEvent, toggleTextVisible, toggleMemories, dismissToast, closeCommand, clearReport, setImageAttached, toggleSpotify, toggleGithub, closePlanPreview }
 }
