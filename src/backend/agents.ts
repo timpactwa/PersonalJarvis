@@ -30,7 +30,13 @@ function extractText(message: unknown): string {
   return blocks.filter(b => b.type === 'text' && b.text).map(b => b.text as string).join('').trim()
 }
 
-export async function spawnAgent(name: string, task: string): Promise<string> {
+const WORKER_SYSTEM_PROMPT =
+  'You are a focused worker agent spawned by Jarvis, a personal desktop assistant. ' +
+  'Complete the assigned task autonomously using the read-only and web tools available to you, ' +
+  'then return a concise, useful summary of what you found or did. ' +
+  'Do not ask clarifying questions — make reasonable assumptions and proceed.'
+
+export async function spawnAgent(name: string, task: string, context?: string): Promise<string> {
   const info: AgentInfo = {
     id: randomUUID(),
     name,
@@ -41,16 +47,25 @@ export async function spawnAgent(name: string, task: string): Promise<string> {
   }
   agents.set(info.id, info)
   emitEvent({ type: 'agent_spawn', id: info.id, name, task })
-  void runAgent(info)
+  void runAgent(info, context)
   return `Spawned agent "${name}" to handle: ${task}. It will report back when done.`
 }
 
-async function runAgent(info: AgentInfo): Promise<void> {
+async function runAgent(info: AgentInfo, context?: string): Promise<void> {
+  const prompt = context && context.trim()
+    ? `Relevant context from the user and their memory:\n${context.trim()}\n\nTask:\n${info.task}`
+    : info.task
   try {
+    console.log(`[agent ${info.name}] starting:`, info.task)
     const { query } = await dynamicImport('@anthropic-ai/claude-agent-sdk')
     for await (const message of query({
-      prompt: info.task,
-      options: { allowedTools: AGENT_TOOLS, permissionMode: 'bypassPermissions', maxTurns: MAX_TURNS },
+      prompt,
+      options: {
+        allowedTools: AGENT_TOOLS,
+        permissionMode: 'bypassPermissions',
+        maxTurns: MAX_TURNS,
+        customSystemPrompt: WORKER_SYSTEM_PROMPT,
+      },
     })) {
       const m = message as { type?: string; result?: unknown }
       if (m.type === 'assistant') {
@@ -62,6 +77,7 @@ async function runAgent(info: AgentInfo): Promise<void> {
       } else if (m.type === 'result') {
         info.status = 'done'
         info.result = String(m.result ?? 'Task complete.')
+        console.log(`[agent ${info.name}] done:`, info.result.slice(0, 200))
         emitEvent({ type: 'agent_done', id: info.id, result: info.result })
         return
       }
@@ -69,11 +85,15 @@ async function runAgent(info: AgentInfo): Promise<void> {
     if (info.status === 'running') {
       info.status = 'done'
       info.result = info.actions[info.actions.length - 1] ?? 'Task complete.'
+      console.log(`[agent ${info.name}] finished (no result message):`, info.result.slice(0, 200))
       emitEvent({ type: 'agent_done', id: info.id, result: info.result })
     }
   } catch (e) {
+    const message = e instanceof Error ? e.message : String(e)
     info.status = 'error'
-    emitEvent({ type: 'agent_error', id: info.id, message: String(e) })
+    info.result = `Agent failed: ${message}`
+    console.error(`[agent ${info.name}] error:`, message)
+    emitEvent({ type: 'agent_error', id: info.id, message })
   }
 }
 
@@ -86,6 +106,7 @@ export const agentToolDefs = [
       properties: {
         name: { type: 'string', description: 'Short name for the agent (e.g. "Research")' },
         task: { type: 'string', description: 'A clear, self-contained description of the task' },
+        context: { type: 'string', description: 'Optional relevant background from the conversation or user memory to give the agent (names, preferences, prior findings)' },
       },
       required: ['name', 'task'],
     },
@@ -93,6 +114,6 @@ export const agentToolDefs = [
 ]
 
 export async function handleAgentTool(name: string, input: Record<string, string>): Promise<string> {
-  if (name === 'spawn_agent') return spawnAgent(input.name, input.task)
+  if (name === 'spawn_agent') return spawnAgent(input.name, input.task, input.context)
   throw new Error(`Unknown tool: ${name}`)
 }

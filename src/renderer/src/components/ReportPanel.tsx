@@ -36,20 +36,21 @@ export function ReportPanel({ content, onClose }: ReportPanelProps): JSX.Element
   return (
     <div style={{
       position: 'absolute', bottom: 0, left: 0, right: 0, height: '42vh',
-      background: 'rgba(240, 247, 255, 0.97)', backdropFilter: 'blur(20px)',
-      borderTop: '1px solid rgba(3, 105, 161, 0.2)',
+      background: 'var(--ov-bg)',
+      borderTop: '1px solid var(--ov-border)',
       display: 'flex', flexDirection: 'column', zIndex: 60,
+      animation: 'overlayIn 0.22s cubic-bezier(0.16,1,0.3,1) forwards',
     }}>
       <div style={{
         display: 'flex', alignItems: 'center', justifyContent: 'space-between',
-        padding: '8px 16px', borderBottom: '1px solid rgba(3, 105, 161, 0.12)',
+        padding: '8px 16px', borderBottom: '1px solid var(--ov-separator)',
       }}>
-        <span style={{ fontFamily: 'var(--font-hud)', fontSize: '10px', letterSpacing: '0.12em', color: '#0369a1' }}>
+        <span style={{ fontFamily: 'var(--font-hud)', fontSize: '10px', letterSpacing: '0.12em', color: 'var(--ov-text-dim)' }}>
           REPORT
         </span>
         <div style={{ display: 'flex', gap: 8 }}>
-          <button onClick={downloadContent} style={pillBtn}>DOWNLOAD</button>
-          <button onClick={onClose} style={pillBtn}>CLOSE</button>
+          <button onClick={downloadContent} className="pill-btn pill-btn--sm">DOWNLOAD</button>
+          <button onClick={onClose} className="pill-btn pill-btn--sm">CLOSE</button>
         </div>
       </div>
       <div style={{ flex: 1, overflow: 'hidden' }}>
@@ -62,17 +63,10 @@ export function ReportPanel({ content, onClose }: ReportPanelProps): JSX.Element
           />
         ) : (
           <div style={{ height: '100%', overflow: 'auto', padding: '12px 16px',
-            fontFamily: 'var(--font-hud)', fontSize: '12px', color: '#1e3a5f' }}
+            fontFamily: 'var(--font-hud)', fontSize: '12px', color: 'var(--ov-text)' }}
             dangerouslySetInnerHTML={{ __html: mdHtml }} />
         )}
       </div>
     </div>
   )
-}
-
-const pillBtn: React.CSSProperties = {
-  borderRadius: 20, background: 'rgba(3, 105, 161, 0.08)',
-  border: '1px solid rgba(3, 105, 161, 0.22)', padding: '5px 14px',
-  fontFamily: 'var(--font-hud)', fontSize: '10px', letterSpacing: '0.12em',
-  cursor: 'pointer', color: '#0369a1',
 }

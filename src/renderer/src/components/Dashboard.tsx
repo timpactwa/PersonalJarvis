@@ -24,16 +24,15 @@ export function Dashboard({ open, onClose, tokensToday, costToday, model, daily,
     left: '50%',
     transform: 'translate(-50%, -50%)',
     width: '480px',
-    background: 'rgba(255, 255, 255, 0.94)',
-    border: '1px solid rgba(3, 105, 161, 0.15)',
-    borderRadius: '12px',
+    background: 'var(--ov-bg)',
+    border: '1px solid var(--ov-border)',
+    borderRadius: 'var(--ov-radius)',
     padding: '32px',
     fontFamily: 'var(--font-hud)',
-    color: 'var(--text)',
-    backdropFilter: 'blur(20px)',
-    boxShadow: '0 8px 40px rgba(3, 80, 140, 0.14), 0 2px 8px rgba(3, 80, 140, 0.06)',
-    zIndex: 100,
-    animation: 'dashboardIn 0.25s cubic-bezier(0.16, 1, 0.3, 1)',
+    color: 'var(--ov-text)',
+    boxShadow: 'var(--ov-shadow)',
+    zIndex: 550,
+    animation: 'overlayIn 0.22s cubic-bezier(0.16,1,0.3,1) forwards',
   }
 
   const row: React.CSSProperties = {
@@ -41,14 +40,14 @@ export function Dashboard({ open, onClose, tokensToday, costToday, model, daily,
     justifyContent: 'space-between',
     alignItems: 'center',
     padding: '14px 0',
-    borderBottom: '1px solid rgba(3, 105, 161, 0.07)',
+    borderBottom: '1px solid var(--ov-separator)',
     fontSize: '11px',
     letterSpacing: '0.1em',
-    color: 'var(--text-mid)',
+    color: 'var(--ov-text-mid)',
   }
 
   const val: React.CSSProperties = {
-    color: '#0a2540',
+    color: 'var(--ov-text)',
     fontSize: '15px',
     fontWeight: 700,
     fontFamily: 'var(--font-data)',
@@ -58,7 +57,7 @@ export function Dashboard({ open, onClose, tokensToday, costToday, model, daily,
   const divider: React.CSSProperties = {
     width: '100%',
     height: '1px',
-    background: 'linear-gradient(90deg, transparent, rgba(3,105,161,0.25), transparent)',
+    background: 'linear-gradient(90deg, transparent, var(--ov-border-hot), transparent)',
     margin: '4px 0',
   }
 
@@ -66,13 +65,14 @@ export function Dashboard({ open, onClose, tokensToday, costToday, model, daily,
     <>
       {/* Backdrop */}
       <div
+        className="no-drag"
         onClick={onClose}
         style={{
-          position: 'absolute',
+          position: 'fixed',
           inset: 0,
-          background: 'rgba(200, 220, 240, 0.25)',
+          background: 'rgba(0, 0, 0, 0.4)',
           backdropFilter: 'blur(2px)',
-          zIndex: 99,
+          zIndex: 549,
         }}
       />
 
@@ -80,32 +80,13 @@ export function Dashboard({ open, onClose, tokensToday, costToday, model, daily,
       <div style={panelStyle} className="no-drag" id="dashboard-panel">
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '20px' }}>
           <div>
-            <span style={{ fontSize: '13px', fontWeight: 700, letterSpacing: '0.15em', color: 'var(--text)' }}>SYSTEM DASHBOARD</span>
+            <span style={{ fontSize: '13px', fontWeight: 700, letterSpacing: '0.15em', color: 'var(--ov-text)' }}>SYSTEM DASHBOARD</span>
             <div style={divider} />
           </div>
           <button
             onClick={onClose}
             id="dashboard-close"
-            style={{
-              background: 'none',
-              border: '1px solid rgba(3,105,161,0.18)',
-              color: 'var(--accent)',
-              cursor: 'pointer',
-              fontSize: '12px',
-              padding: '4px 10px',
-              borderRadius: '4px',
-              fontFamily: 'var(--font-hud)',
-              letterSpacing: '0.1em',
-              transition: 'all 0.2s',
-            }}
-            onMouseEnter={e => {
-              e.currentTarget.style.borderColor = 'rgba(3,105,161,0.45)'
-              e.currentTarget.style.background = 'rgba(3,105,161,0.07)'
-            }}
-            onMouseLeave={e => {
-              e.currentTarget.style.borderColor = 'rgba(3,105,161,0.18)'
-              e.currentTarget.style.background = 'none'
-            }}
+            className="pill-btn pill-btn--icon"
           >✕</button>
         </div>
 
@@ -145,30 +126,16 @@ export function Dashboard({ open, onClose, tokensToday, costToday, model, daily,
 
         <button
           onClick={onOpenSettings}
-          className="no-drag"
-          style={{
-            marginTop: 18, width: '100%', background: 'none',
-            border: '1px solid rgba(3,105,161,0.2)', color: 'var(--accent)',
-            cursor: 'pointer', fontFamily: 'var(--font-hud)', fontSize: 11,
-            letterSpacing: '0.12em', padding: '8px 0', borderRadius: 4,
-            transition: 'background 0.15s, border-color 0.15s',
-          }}
-          onMouseEnter={e => {
-            e.currentTarget.style.background = 'rgba(3,105,161,0.07)'
-            e.currentTarget.style.borderColor = 'rgba(3,105,161,0.4)'
-          }}
-          onMouseLeave={e => {
-            e.currentTarget.style.background = 'none'
-            e.currentTarget.style.borderColor = 'rgba(3,105,161,0.2)'
-          }}
+          className="pill-btn no-drag"
+          style={{ marginTop: 18, width: '100%', padding: '8px 0' }}
         >OPEN SETTINGS</button>
 
         <div style={{
           marginTop: '20px',
           paddingTop: '16px',
-          borderTop: '1px solid rgba(3, 105, 161, 0.07)',
+          borderTop: '1px solid var(--ov-separator)',
           fontSize: '9px',
-          color: 'var(--text-dim)',
+          color: 'var(--ov-text-dim)',
           letterSpacing: '0.12em',
           textAlign: 'center',
         }}>
