@@ -41,8 +41,24 @@ export const jarvisToolDefs: JarvisToolDef[] = [
         ollamaModel: { type: 'string', description: 'Local Ollama model name.' },
         ollamaBaseUrl: { type: 'string', description: 'Ollama server URL.' },
         userProfile: { type: 'string', description: 'Free-text profile injected into every conversation.' },
+        quietMode: {
+          type: 'boolean',
+          description: 'Enable quiet mode to silence TTS and disable push-to-talk. Useful in quiet spaces.',
+        },
       },
       required: [],
+    },
+  },
+  {
+    name: 'jarvis_open_panel',
+    description:
+      'Open the Spotify or GitHub dashboard panel in the Jarvis UI. Use when the user says "show me Spotify", "pull up GitHub", "open my GitHub dashboard", "show my repos", "show my music", or any request to visually see these services — not just get text info.',
+    input_schema: {
+      type: 'object',
+      properties: {
+        panel: { type: 'string', enum: ['spotify', 'github'], description: 'Which panel to open: "spotify" or "github"' },
+      },
+      required: ['panel'],
     },
   },
   {
@@ -115,6 +131,7 @@ function validatePartial(input: Record<string, unknown>): Partial<Settings> {
   if (input.ollamaModel !== undefined) partial.ollamaModel = String(input.ollamaModel).trim()
   if (input.ollamaBaseUrl !== undefined) partial.ollamaBaseUrl = String(input.ollamaBaseUrl).trim()
   if (input.userProfile !== undefined) partial.userProfile = String(input.userProfile)
+  if (input.quietMode !== undefined) partial.quietMode = Boolean(input.quietMode)
 
   if (input.shortTurns !== undefined) {
     const n = Number(input.shortTurns)
@@ -164,6 +181,9 @@ export function setJarvisSettings(input: Record<string, unknown>): string {
     emitEvent({ type: 'hotkey_changed', hotkey: updated.hotkey })
   }
   if (partial.screenshotHotkey) emitEvent({ type: 'screenshot_hotkey_changed', hotkey: updated.screenshotHotkey })
+  if (partial.quietMode !== undefined) {
+    emitEvent({ type: 'quiet_mode_changed', enabled: updated.quietMode })
+  }
 
   const changed = Object.keys(partial).join(', ')
   const warn = warnings.length > 0 ? `\nWarning: ${warnings.join(' ')}` : ''
@@ -220,6 +240,14 @@ export async function handleJarvisTool(name: string, input: Record<string, unkno
       return getJarvisSettings()
     case 'jarvis_set_settings':
       return setJarvisSettings(input)
+    case 'jarvis_open_panel': {
+      const panel = input.panel
+      if (panel !== 'spotify' && panel !== 'github') {
+        throw new Error(`Invalid panel "${String(panel)}". Use spotify or github.`)
+      }
+      emitEvent({ type: 'panel_open', panel })
+      return `Opening ${panel} panel.`
+    }
     case 'jarvis_get_usage':
       return getJarvisUsage(Number(input.days))
     default:

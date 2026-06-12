@@ -17,6 +17,8 @@ export interface Settings {
   spotifyAccessToken: string
   spotifyExpiresAt: number
   spotifyRefreshToken: string
+  /** Silence TTS and disable push-to-talk for quiet spaces. */
+  quietMode: boolean
 }
 
 export interface AgentInfo {
@@ -102,6 +104,8 @@ export type BackendEvent =
   | { type: 'memories'; memories: MemoryEntry[] }
   | { type: 'report'; format: 'html' | 'md'; content: string }
   | { type: 'screenshot_request'; prompt: string }
+  | { type: 'panel_open'; panel: 'spotify' | 'github' }
+  | { type: 'quiet_mode_changed'; enabled: boolean }
 
 // Events sent from renderer → backend
 export type RendererEvent =

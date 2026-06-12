@@ -14,6 +14,7 @@ const DEFAULTS: Settings = {
   spotifyAccessToken: '',
   spotifyExpiresAt: 0,
   spotifyRefreshToken: '',
+  quietMode: false,
 }
 
 export function getSettings(): Settings {
@@ -48,6 +49,7 @@ export function getSettings(): Settings {
     spotifyAccessToken: map.get('spotifyAccessToken') ?? DEFAULTS.spotifyAccessToken,
     spotifyExpiresAt: map.has('spotifyExpiresAt') ? Number(map.get('spotifyExpiresAt')) : DEFAULTS.spotifyExpiresAt,
     spotifyRefreshToken: map.get('spotifyRefreshToken') ?? DEFAULTS.spotifyRefreshToken,
+    quietMode: map.has('quietMode') ? map.get('quietMode') === 'true' : DEFAULTS.quietMode,
   }
 }
 

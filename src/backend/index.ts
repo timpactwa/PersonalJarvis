@@ -565,7 +565,8 @@ async function processUserText(userText: string, source: string): Promise<void> 
 // renderer drives the speaking→idle transition around actual audio playback,
 // so no fixed timers — those kept the UI locked for seconds after every reply.
 async function speakOrIdle(text: string): Promise<void> {
-  if (!process.env.ELEVENLABS_API_KEY || process.env.ELEVENLABS_API_KEY === 'your_key_from_elevenlabs') {
+  const { quietMode } = getSettings()
+  if (quietMode || !process.env.ELEVENLABS_API_KEY || process.env.ELEVENLABS_API_KEY === 'your_key_from_elevenlabs') {
     broadcast({ type: 'state', state: 'idle' })
     return
   }
