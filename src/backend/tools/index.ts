@@ -8,6 +8,8 @@ import { searchToolDefs, handleSearchTool } from './search'
 import { jarvisToolDefs, handleJarvisTool } from './jarvis'
 import { commandToolDefs, handleCommandTool } from './commands'
 import { visionToolDefs, handleVisionTool } from './vision'
+import { githubToolDefs, handleGithubTool } from './github'
+import { spotifyToolDefs, handleSpotifyTool } from './spotify'
 import { insertUserEvent } from '../memory/db'
 import type { Tool } from '@anthropic-ai/sdk/resources'
 
@@ -24,6 +26,8 @@ export function getTools(): Tool[] {
     ...jarvisToolDefs,
     ...commandToolDefs,
     ...visionToolDefs,
+    ...githubToolDefs,
+    ...spotifyToolDefs,
   ] as Tool[]
 }
 
@@ -40,6 +44,8 @@ export function getToolsForGroq(): Tool[] {
     ...jarvisToolDefs,
     ...commandToolDefs,
     ...visionToolDefs,
+    ...(githubToolDefs.filter((t: { name: string }) => t.name !== 'github_pr_describe') as Tool[]),
+    ...spotifyToolDefs,
   ] as Tool[]
 }
 
@@ -57,6 +63,7 @@ export function getToolsForAgent(): Tool[] {
     ...jarvisToolDefs,
     ...commandToolDefs,
     ...visionToolDefs,
+    ...githubToolDefs,
   ] as Tool[]
 }
 
@@ -74,6 +81,7 @@ export async function handleTool(name: string, input: Record<string, unknown>): 
   else if (name === 'jarvis_screenshot')  result = await handleVisionTool(name, input)
   else if (name.startsWith('jarvis_'))    result = await handleJarvisTool(name, input)
   else if (name.startsWith('command_'))   result = await handleCommandTool(name, input)
+  else if (name.startsWith('github_'))   result = await handleGithubTool(name, input)
   else throw new Error(`Unknown tool: ${name}`)
 
   // Preference learning — track usage (fire-and-forget, non-critical)
