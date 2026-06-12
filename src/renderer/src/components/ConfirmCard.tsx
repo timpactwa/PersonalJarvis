@@ -20,7 +20,7 @@ export function ConfirmCard({ action, detail, onConfirm, onCancel }: Props): JSX
         border: '1px solid rgba(180, 120, 0, 0.3)',
         borderRadius: 10,
         padding: 20,
-        fontFamily: '"Orbitron", monospace',
+        fontFamily: 'var(--font-hud)',
         color: '#78350f',
         boxShadow: '0 8px 32px rgba(180, 120, 0, 0.14)',
         backdropFilter: 'blur(12px)',
@@ -30,7 +30,7 @@ export function ConfirmCard({ action, detail, onConfirm, onCancel }: Props): JSX
       <div style={{ fontSize: 12, fontWeight: 700, letterSpacing: '0.12em', marginBottom: 8 }}>
         CONFIRM · {action.toUpperCase()}
       </div>
-      <div style={{ fontFamily: '"Share Tech Mono", monospace', fontSize: 12, color: '#0a2540', whiteSpace: 'pre-wrap', marginBottom: 16 }}>
+      <div style={{ fontFamily: 'var(--font-mono)', fontSize: 12, color: '#0a2540', whiteSpace: 'pre-wrap', marginBottom: 16 }}>
         {detail}
       </div>
       <div style={{ display: 'flex', gap: 12, justifyContent: 'flex-end' }}>
@@ -50,10 +50,10 @@ function btn(color: string): React.CSSProperties {
     border: `1px solid ${color}`,
     color,
     cursor: 'pointer',
-    fontFamily: '"Orbitron", monospace',
+    fontFamily: 'var(--font-hud)',
     fontSize: 11,
     letterSpacing: '0.1em',
-    padding: '6px 16px',
-    borderRadius: 4,
+    padding: '6px 18px',
+    borderRadius: 20,
   }
 }

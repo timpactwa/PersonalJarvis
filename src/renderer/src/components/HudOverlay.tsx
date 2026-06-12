@@ -57,7 +57,7 @@ export function HudOverlay({ animState, tokensToday, costToday, model, llmProvid
       }}>
         <div style={{
           fontFamily: 'var(--font-hud)',
-          fontSize: 13,
+          fontSize: 15,
           fontWeight: 700,
           color: '#0a2540',
           letterSpacing: '0.3em',
@@ -77,7 +77,11 @@ export function HudOverlay({ animState, tokensToday, costToday, model, llmProvid
           letterSpacing: '0.18em',
           color: STATUS_COLORS[animState],
           transition: 'color 0.4s',
+          display: 'flex',
+          alignItems: 'center',
+          gap: 6,
         }}>
+          <span style={{ fontSize: 8 }}>●</span>
           {STATUS_LABELS[animState]}
         </div>
       </div>
@@ -99,47 +103,17 @@ export function HudOverlay({ animState, tokensToday, costToday, model, llmProvid
         <div style={{ display: 'flex', gap: 5 }}>
           <button
             onClick={onStatsClick}
-            style={{
-              background: 'rgba(3, 105, 161, 0.07)',
-              border: '1px solid var(--border)',
-              borderRadius: 4,
-              color: 'var(--accent)',
-              cursor: 'pointer',
-              fontFamily: 'var(--font-hud)',
-              fontSize: 8,
-              letterSpacing: '0.22em',
-              padding: '4px 11px',
-              transition: 'background 0.15s, border-color 0.15s, box-shadow 0.15s',
-            }}
-            onMouseEnter={e => {
-              const el = e.currentTarget
-              el.style.background = 'rgba(3,105,161,0.14)'
-              el.style.borderColor = 'var(--border-hot)'
-              el.style.boxShadow = '0 2px 12px rgba(3,105,161,0.15)'
-            }}
-            onMouseLeave={e => {
-              const el = e.currentTarget
-              el.style.background = 'rgba(3, 105, 161, 0.07)'
-              el.style.borderColor = 'var(--border)'
-              el.style.boxShadow = 'none'
-            }}
+            className="pill-btn"
           >
             DASHBOARD
           </button>
           <button
             onClick={onToggleText}
             title={textVisible ? 'Hide transcript' : 'Show transcript'}
+            className="pill-btn"
             style={{
-              background: textVisible ? 'rgba(3,105,161,0.12)' : 'rgba(3,105,161,0.03)',
-              border: textVisible ? '1px solid rgba(3,105,161,0.4)' : '1px solid var(--border)',
-              borderRadius: 4,
+              background: textVisible ? 'rgba(3,105,161,0.18)' : 'rgba(3,105,161,0.04)',
               color: textVisible ? 'var(--accent)' : 'var(--text-dim)',
-              cursor: 'pointer',
-              fontFamily: 'var(--font-hud)',
-              fontSize: 8,
-              letterSpacing: '0.22em',
-              padding: '4px 9px',
-              transition: 'background 0.2s, border-color 0.2s, color 0.2s',
             }}
           >
             TEXT

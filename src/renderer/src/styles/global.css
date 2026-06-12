@@ -11,9 +11,9 @@
   --border:       rgba(3, 105, 161, 0.14);
   --border-hot:   rgba(3, 105, 161, 0.48);
   --shadow:       0 4px 24px rgba(3, 80, 140, 0.12);
-  --font-hud:     'Orbitron', monospace;
-  --font-data:    'Rajdhani', monospace;
-  --font-mono:    'Share Tech Mono', monospace;
+  --font-hud:     'JetBrains Mono', monospace;
+  --font-data:    'JetBrains Mono', monospace;
+  --font-mono:    'JetBrains Mono', monospace;
 }
 
 *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
@@ -113,3 +113,26 @@ body {
 ::-webkit-scrollbar       { width: 3px; }
 ::-webkit-scrollbar-track { background: transparent; }
 ::-webkit-scrollbar-thumb { background: var(--accent-dim); border-radius: 2px; }
+
+/* ── Pill buttons ─────────────────────────────────────── */
+
+.pill-btn {
+  background: rgba(3, 105, 161, 0.08);
+  border: 1px solid rgba(3, 105, 161, 0.22);
+  border-radius: 20px;
+  color: var(--accent);
+  cursor: pointer;
+  font-family: var(--font-hud);
+  font-size: 10px;
+  letter-spacing: 0.12em;
+  padding: 5px 14px;
+  transition: background 0.15s, border-color 0.15s;
+}
+.pill-btn:hover {
+  background: rgba(3, 105, 161, 0.15);
+  border-color: rgba(3, 105, 161, 0.45);
+}
+.pill-btn:disabled {
+  opacity: 0.4;
+  cursor: default;
+}

@@ -1,5 +1,5 @@
 import { useState, useCallback } from 'react'
-import type { AnimState, BackendEvent, AgentInfo, Settings, UsagePoint, ModelUsage, EmailDraft, EmailMessage, CalendarEventDraft } from '../../../backend/types'
+import type { AnimState, BackendEvent, AgentInfo, Settings, UsagePoint, ModelUsage, EmailDraft, EmailMessage, CalendarEventDraft, MemoryEntry } from '../../../backend/types'
 
 export interface PendingConfirm {
   id: string
@@ -12,6 +12,8 @@ export interface ConversationTurn {
   role: 'user' | 'assistant'
   text: string
 }
+
+export interface Toast { id: number; text: string }
 
 export interface JarvisState {
   anim: AnimState
@@ -34,6 +36,9 @@ export interface JarvisState {
   viewer: EmailMessage[] | null
   eventDraft: CalendarEventDraft | null
   textVisible: boolean
+  memoriesOpen: boolean
+  memories: MemoryEntry[]
+  toasts: Toast[]
 }
 
 const initial: JarvisState = {
@@ -57,15 +62,12 @@ const initial: JarvisState = {
   viewer: null,
   eventDraft: null,
   textVisible: true,
+  memoriesOpen: false,
+  memories: [],
+  toasts: [],
 }
 
-export function useAnimState(): {
-  state: JarvisState
-  handleEvent: (event: BackendEvent) => void
-  toggleDashboard: () => void
-  toggleSettings: () => void
-  clearError: () => void
-} {
+export function useAnimState() {
   const [state, setState] = useState<JarvisState>(initial)
 
   const handleEvent = useCallback((event: BackendEvent) => {
@@ -98,8 +100,15 @@ export function useAnimState(): {
           return { ...prev, agents: [...prev.agents, { id: event.id, name: event.name, task: event.task, status: 'running', actions: [], startedAt: Date.now() }] }
         case 'agent_update':
           return { ...prev, agents: prev.agents.map(a => a.id === event.id ? { ...a, actions: [...a.actions, event.action] } : a) }
-        case 'agent_done':
-          return { ...prev, agents: prev.agents.map(a => a.id === event.id ? { ...a, status: 'done', result: event.result } : a) }
+        case 'agent_done': {
+          const agent = prev.agents.find(a => a.id === event.id)
+          const toast: Toast = { id: Date.now() + Math.random(), text: `Agent complete: ${agent?.name ?? 'subagent'}` }
+          return {
+            ...prev,
+            agents: prev.agents.map(a => a.id === event.id ? { ...a, status: 'done', result: event.result } : a),
+            toasts: [...prev.toasts, toast],
+          }
+        }
         case 'agent_error':
           return { ...prev, agents: prev.agents.map(a => a.id === event.id ? { ...a, status: 'error', result: event.message } : a) }
         case 'usage':
@@ -114,6 +123,8 @@ export function useAnimState(): {
           return { ...prev, eventDraft: event.event }
         case 'toggle_text':
           return { ...prev, textVisible: !prev.textVisible }
+        case 'memories':
+          return { ...prev, memories: event.memories }
         default:
           return prev
       }
@@ -128,6 +139,8 @@ export function useAnimState(): {
   const openCompose = useCallback((draft: EmailDraft) => setState(prev => ({ ...prev, compose: draft })), [])
   const closeEvent = useCallback(() => setState(prev => ({ ...prev, eventDraft: null })), [])
   const toggleTextVisible = useCallback(() => setState(prev => ({ ...prev, textVisible: !prev.textVisible })), [])
+  const toggleMemories = useCallback(() => setState(prev => ({ ...prev, memoriesOpen: !prev.memoriesOpen })), [])
+  const dismissToast = useCallback((id: number) => setState(prev => ({ ...prev, toasts: prev.toasts.filter(t => t.id !== id) })), [])
 
-  return { state, handleEvent, toggleDashboard, toggleSettings, clearError, closeCompose, closeViewer, openCompose, closeEvent, toggleTextVisible }
+  return { state, handleEvent, toggleDashboard, toggleSettings, clearError, closeCompose, closeViewer, openCompose, closeEvent, toggleTextVisible, toggleMemories, dismissToast }
 }

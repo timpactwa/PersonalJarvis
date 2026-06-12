@@ -38,6 +38,29 @@ describe('database', () => {
     expect(rows[0].embedding.length).toBe(3)
   })
 
+  it('returns id and timestamp from getAllMemories', async () => {
+    const { initDb, insertMemory, getAllMemories } = await import('../../../src/backend/memory/db')
+    initDb()
+    insertMemory('Likes espresso', new Float32Array([0.1, 0.2, 0.3]))
+    const rows = getAllMemories()
+    expect(rows[0].id).toBeGreaterThan(0)
+    expect(rows[0].timestamp).toBeGreaterThan(0)
+  })
+
+  it('deleteMemory removes a memory by id', async () => {
+    const { initDb, insertMemory, getAllMemories, deleteMemory } = await import('../../../src/backend/memory/db')
+    initDb()
+    insertMemory('First fact', new Float32Array([0.1, 0.2, 0.3]))
+    insertMemory('Second fact', new Float32Array([0.4, 0.5, 0.6]))
+    const before = getAllMemories()
+    expect(before).toHaveLength(2)
+    const target = before.find(m => m.text === 'First fact')!
+    deleteMemory(target.id)
+    const after = getAllMemories()
+    expect(after).toHaveLength(1)
+    expect(after[0].text).toBe('Second fact')
+  })
+
   it('logs api calls and aggregates daily stats', async () => {
     const { initDb, logApiCall, getStatsToday } = await import('../../../src/backend/memory/db')
     initDb()

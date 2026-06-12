@@ -25,6 +25,7 @@ export interface AgentInfo {
 
 export interface UsagePoint { date: string; tokens: number; cost: number }
 export interface ModelUsage { model: string; tokens: number; cost: number }
+export interface MemoryEntry { id: number; text: string; createdAt: number }
 
 export interface EmailDraft {
   id: string
@@ -70,6 +71,7 @@ export type BackendEvent =
   | { type: 'email_view'; emails: EmailMessage[] }
   | { type: 'event_compose'; event: CalendarEventDraft }
   | { type: 'toggle_text' }
+  | { type: 'memories'; memories: MemoryEntry[] }
 
 // Events sent from renderer → backend
 export type RendererEvent =
@@ -84,3 +86,5 @@ export type RendererEvent =
   | { type: 'email_send'; draft: EmailDraft }
   | { type: 'email_draft_save'; draft: EmailDraft }
   | { type: 'event_create'; event: CalendarEventDraft }
+  | { type: 'get_memories' }
+  | { type: 'delete_memory'; id: number }

@@ -132,12 +132,15 @@ function lerp(a: number, b: number, k: number): number {
 
 interface Props {
   state: AnimState
+  amplitude?: number
 }
 
-export function ParticleRing({ state }: Props): JSX.Element {
+export function ParticleRing({ state, amplitude = 0 }: Props): JSX.Element {
   const canvasRef = useRef<HTMLCanvasElement>(null)
   const stateRef = useRef<AnimState>(state)
   stateRef.current = state
+  const ampRef = useRef<number>(amplitude)
+  ampRef.current = amplitude
 
   useEffect(() => {
     const canvas = canvasRef.current
@@ -263,13 +266,16 @@ export function ParticleRing({ state }: Props): JSX.Element {
         // Organic wander: slow per-particle oscillation of the radial home.
         const wander = Math.sin(time * p.driftSpeed + p.driftPhase) * thickness * 0.55
 
+        // amp: 0 → gentle ambient pulse (0.3), 1 → full reactive pulse (1.0)
+        const amp = 0.3 + ampRef.current * 0.7
+
         // Listening: rhythmic waveform traveling around the ring, pulling inward.
         const lw = Math.sin(time * 0.058 - p.angle * 4)
-        const listenPull = -(lw > 0 ? lw * lw : 0) * thickness * 1.05 * cur.listenWave
+        const listenPull = -(lw > 0 ? lw * lw : 0) * thickness * 1.05 * cur.listenWave * amp
 
         // Speaking: waves flowing outward around the ring.
         const sw = Math.sin(time * 0.045 + p.angle * 3)
-        const speakPush = (sw > 0 ? sw : sw * 0.3) * thickness * 1.1 * cur.speakWave
+        const speakPush = (sw > 0 ? sw : sw * 0.3) * thickness * 1.1 * cur.speakWave * amp
 
         // Spring-damper integration toward the (perturbed) ring path.
         const home = ringRadius + (p.radiusOffset * thickness + wander) * cur.scatter + listenPull + speakPush

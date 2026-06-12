@@ -40,7 +40,7 @@ export function EventEditor({ event, onCreate, onClose }: Props): JSX.Element {
     background: 'rgba(255,255,255,0.97)',
     border: '1px solid rgba(3,105,161,0.18)',
     borderRadius: 14,
-    fontFamily: '"Orbitron", monospace',
+    fontFamily: 'var(--font-hud)',
     color: 'var(--text)',
     backdropFilter: 'blur(24px)',
     boxShadow: '0 12px 60px rgba(3,80,140,0.18)',
@@ -87,7 +87,7 @@ export function EventEditor({ event, onCreate, onClose }: Props): JSX.Element {
     borderRadius: 5,
     color: 'var(--text)',
     padding: '7px 10px',
-    fontFamily: '"Share Tech Mono", monospace',
+    fontFamily: 'var(--font-mono)',
     fontSize: 12,
     outline: 'none',
   }
@@ -112,7 +112,7 @@ export function EventEditor({ event, onCreate, onClose }: Props): JSX.Element {
   }
 
   const btnBase: React.CSSProperties = {
-    fontFamily: '"Orbitron", monospace',
+    fontFamily: 'var(--font-hud)',
     fontSize: 10,
     letterSpacing: '0.12em',
     padding: '9px 18px',

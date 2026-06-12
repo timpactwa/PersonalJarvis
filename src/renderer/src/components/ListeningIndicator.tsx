@@ -79,7 +79,7 @@ export function ListeningIndicator({ state }: Props): JSX.Element {
         <div
           className={active ? 'li-label li-label--on' : 'li-label'}
           style={{
-            fontFamily: '"Orbitron", monospace',
+            fontFamily: 'var(--font-hud)',
             fontSize: '9px',
             letterSpacing: '0.32em',
             color: '#7dd3fc',
