@@ -205,6 +205,10 @@ body {
   color: var(--ov-accent);
   box-shadow: 0 0 8px var(--ov-accent-glow);
 }
+.pill-btn--active:hover {
+  background: var(--ov-accent-dim);
+  border-color: var(--ov-border-hot);
+}
 .pill-btn--danger {
   border-color: rgba(239, 68, 68, 0.4);
   color: #ef4444;
