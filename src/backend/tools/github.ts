@@ -1,5 +1,7 @@
 import { execFile } from 'child_process'
 import { promisify } from 'util'
+import { emitEvent } from '../events'
+import type { GithubRow } from '../types'
 
 const execFileAsync = promisify(execFile)
 
@@ -132,9 +134,20 @@ async function prList(repo?: string, limit = 10): Promise<string> {
       state: string; updatedAt: string; isDraft: boolean
     }>
     if (prs.length === 0) return 'No open pull requests.'
-    return prs.map(pr =>
+    const result = prs.map(pr =>
       `#${pr.number} ${pr.isDraft ? '[DRAFT] ' : ''}${pr.title}\n  by @${pr.author.login} · updated ${new Date(pr.updatedAt).toLocaleDateString()}`
     ).join('\n\n')
+    try {
+      const rows: GithubRow[] = prs.map(pr => ({
+        title: `#${pr.number} ${pr.isDraft ? '[DRAFT] ' : ''}${pr.title}`,
+        subtitle: pr.author?.login,
+        meta: pr.updatedAt ? new Date(pr.updatedAt).toLocaleDateString() : undefined,
+        badge: pr.state ?? 'OPEN',
+        badgeColor: '#0ea5e9',
+      }))
+      emitEvent({ type: 'github_data', tab: 'PRs', rows })
+    } catch { /* non-critical */ }
+    return result
   } catch {
     return out
   }
@@ -180,10 +193,21 @@ async function issueList(repo?: string, label?: string, limit = 10): Promise<str
       labels: Array<{ name: string }>; updatedAt: string
     }>
     if (issues.length === 0) return 'No open issues.'
-    return issues.map(i => {
+    const result = issues.map(i => {
       const labels = i.labels.map(l => l.name).join(', ')
       return `#${i.number} ${i.title}\n  by @${i.author.login}${labels ? ` · [${labels}]` : ''}`
     }).join('\n\n')
+    try {
+      const rows: GithubRow[] = issues.map(i => ({
+        title: `#${i.number} ${i.title}`,
+        subtitle: i.author?.login,
+        meta: i.updatedAt ? new Date(i.updatedAt).toLocaleDateString() : undefined,
+        badge: i.labels?.[0]?.name,
+        badgeColor: '#f59e0b',
+      }))
+      emitEvent({ type: 'github_data', tab: 'ISSUES', rows })
+    } catch { /* non-critical */ }
+    return result
   } catch {
     return out
   }
@@ -192,13 +216,23 @@ async function issueList(repo?: string, label?: string, limit = 10): Promise<str
 async function commitLog(repo?: string, limit = 10): Promise<string> {
   const cwd = repo && !repo.includes('/') ? repo : undefined
   const repoFlag = repo?.includes('/') ? repoArgs(repo) : []
+  let result: string
   if (repoFlag.length > 0) {
     const args = ['api', `repos/${repo}/commits`, '--jq',
       `.[0:${limit}] | .[] | "\\(.sha[0:7]) \\(.commit.message | split("\\n")[0]) — \\(.commit.author.name)"`,
     ]
-    return runGh(args)
+    result = await runGh(args)
+  } else {
+    result = await runGit(['log', `--max-count=${limit}`, '--oneline', '--no-decorate'], cwd)
   }
-  return runGit(['log', `--max-count=${limit}`, '--oneline', '--no-decorate'], cwd)
+  try {
+    const lines = result.split('\n').filter(Boolean)
+    const rows: GithubRow[] = lines.slice(0, 10).map(line => ({
+      title: line.slice(0, 72),
+    }))
+    emitEvent({ type: 'github_data', tab: 'COMMITS', rows })
+  } catch { /* non-critical */ }
+  return result
 }
 
 async function repoStatus(repoPath?: string): Promise<string> {
@@ -216,11 +250,19 @@ async function repoStatus(repoPath?: string): Promise<string> {
     ? 'up to date with remote'
     : `${aheadCount} ahead, ${behindCount} behind remote`
 
-  return [
+  const result = [
     `Branch: ${branch}`,
     `Sync: ${syncStatus}`,
     status ? `Uncommitted changes:\n${status}` : 'Working tree clean',
   ].join('\n')
+  try {
+    const lines = result.split('\n').filter(l => l.trim())
+    const rows: GithubRow[] = lines.slice(0, 8).map(line => ({
+      title: line.trim().slice(0, 80),
+    }))
+    emitEvent({ type: 'github_data', tab: 'STATUS', rows })
+  } catch { /* non-critical */ }
+  return result
 }
 
 async function prDescribe(repo?: string, base = 'main'): Promise<string> {
