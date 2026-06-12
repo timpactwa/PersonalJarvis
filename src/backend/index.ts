@@ -559,6 +559,10 @@ async function runConversation(userText: string): Promise<void> {
       hour: 'numeric', minute: '2-digit', hour12: true,
     })}`)
 
+    // User profile — the self-authored "about me", always front-of-context
+    const profile = getSettings().userProfile?.trim()
+    if (profile) topMems.push(`About the user: ${profile}`)
+
     // Preference summary — what tools and searches this user uses most
     const prefs = getPreferenceSummary()
     if (prefs) topMems.push(prefs)

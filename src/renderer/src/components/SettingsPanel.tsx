@@ -63,6 +63,15 @@ export function SettingsPanel({ open, settings, onClose, onSave, onHotkeyChange,
           <button onClick={onClose} style={{ background: 'none', border: 'none', color: 'var(--text-mid)', cursor: 'pointer', fontSize: 14 }}>✕</button>
         </div>
 
+        <div style={sectionLabel}>ABOUT YOU</div>
+        <label style={label}>JARVIS REMEMBERS THIS ABOUT YOU EVERY CONVERSATION</label>
+        <textarea
+          style={{ ...field, minHeight: 96, resize: 'vertical', lineHeight: 1.5 }}
+          value={draft.userProfile}
+          onChange={e => setDraft({ ...draft, userProfile: e.target.value })}
+          placeholder="e.g. I'm Tim, a CS student at Virginia Tech. I prefer concise answers and work mostly in TypeScript. Coffee over tea."
+        />
+
         <div style={sectionLabel}>VOICE</div>
         <label style={label}>PUSH-TO-TALK HOTKEY</label>
         <input style={field} value={draft.hotkey} onChange={e => setDraft({ ...draft, hotkey: e.target.value })} placeholder="Alt+Space" />

@@ -2,6 +2,7 @@ import Anthropic from '@anthropic-ai/sdk'
 import type { BackendEvent } from './types'
 import { getTools, handleTool } from './tools/index'
 import { getSettings } from './memory/settings'
+import { PROFILE_AND_MEMORY_NOTE } from './prompt'
 
 // Note: 'open' is intentionally excluded — it matches too broadly (e.g. "open
 // vs code" is conversational), while concrete launch intents are captured by
@@ -61,7 +62,7 @@ RULES:
 - Use tools proactively — always attempt the tool call first, never preemptively refuse.
 - Google (Gmail + Calendar) credentials are configured on this system — always call the tool.
 - Only report a capability missing if the tool itself throws an error.
-- Never say "Certainly!" or "Of course!" — just answer directly.`
+- Never say "Certainly!" or "Of course!" — just answer directly.` + PROFILE_AND_MEMORY_NOTE
 
 export interface Message {
   role: 'user' | 'assistant'
