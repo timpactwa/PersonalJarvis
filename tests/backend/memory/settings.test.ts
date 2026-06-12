@@ -43,6 +43,22 @@ describe('settings store', () => {
     expect(s.shortTurns).toBe(20) // untouched default
   })
 
+  it('defaults userProfile to an empty string', async () => {
+    const { initDb } = await import('../../../src/backend/memory/db')
+    const { getSettings } = await import('../../../src/backend/memory/settings')
+    initDb()
+    expect(getSettings().userProfile).toBe('')
+  })
+
+  it('persists a multi-line userProfile', async () => {
+    const { initDb } = await import('../../../src/backend/memory/db')
+    const { setSettings, getSettings } = await import('../../../src/backend/memory/settings')
+    initDb()
+    const profile = 'I am Tim, a CS student at Virginia Tech.\nI prefer concise answers.'
+    setSettings({ userProfile: profile })
+    expect(getSettings().userProfile).toBe(profile)
+  })
+
   it('coerces numeric shortTurns from stored string', async () => {
     const { initDb } = await import('../../../src/backend/memory/db')
     const { setSettings, getSettings } = await import('../../../src/backend/memory/settings')

@@ -1,6 +1,7 @@
 import type { BackendEvent } from './types'
 import { getToolsForGroq, handleTool } from './tools/index'
 import type { PendingEntity } from './claude'
+import { PROFILE_AND_MEMORY_NOTE } from './prompt'
 
 const SYSTEM_PROMPT = `You are Jarvis, a personal AI assistant running as a desktop overlay. Speak in a polished, concise British manner — helpful and confident without being verbose. Keep responses under 3 sentences unless detail is genuinely needed.
 
@@ -30,7 +31,7 @@ STORING FACTS: For general facts use [REMEMBER: fact].
 RULES:
 - Always attempt tool calls first — never preemptively refuse.
 - Only report a capability missing if the tool itself throws an error.
-- Never say "Certainly!" or "Of course!" — just answer directly.`
+- Never say "Certainly!" or "Of course!" — just answer directly.` + PROFILE_AND_MEMORY_NOTE
 
 const GROQ_BASE_URL = 'https://api.groq.com/openai/v1'
 const DEFAULT_MODEL = 'llama-3.3-70b-versatile'

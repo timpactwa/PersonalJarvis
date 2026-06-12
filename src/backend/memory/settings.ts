@@ -9,6 +9,7 @@ const DEFAULTS: Settings = {
   shortTurns: 20,
   ollamaModel: process.env.OLLAMA_MODEL ?? 'llama3.1:8b',
   ollamaBaseUrl: process.env.OLLAMA_BASE_URL ?? 'http://127.0.0.1:11434',
+  userProfile: '',
 }
 
 export function getSettings(): Settings {
@@ -38,6 +39,7 @@ export function getSettings(): Settings {
     shortTurns,
     ollamaModel: map.get('ollamaModel') ?? DEFAULTS.ollamaModel,
     ollamaBaseUrl: map.get('ollamaBaseUrl') ?? DEFAULTS.ollamaBaseUrl,
+    userProfile: map.get('userProfile') ?? DEFAULTS.userProfile,
   }
 }
 

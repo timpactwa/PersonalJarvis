@@ -11,6 +11,8 @@ export interface Settings {
   shortTurns: number
   ollamaModel: string
   ollamaBaseUrl: string
+  /** Free-text "about me" the user authors; injected into Jarvis's context each turn. */
+  userProfile: string
 }
 
 export interface AgentInfo {
