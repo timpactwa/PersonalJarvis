@@ -1,5 +1,5 @@
 import { useState, useCallback } from 'react'
-import type { AnimState, BackendEvent, AgentInfo, Settings, UsagePoint, ModelUsage, EmailDraft, EmailMessage, CalendarEventDraft, MemoryEntry } from '../../../backend/types'
+import type { AnimState, BackendEvent, AgentInfo, Settings, UsagePoint, ModelUsage, EmailDraft, EmailMessage, CalendarEventDraft, MemoryEntry, CustomCommandDraft } from '../../../backend/types'
 
 export interface PendingConfirm {
   id: string
@@ -39,6 +39,9 @@ export interface JarvisState {
   memoriesOpen: boolean
   memories: MemoryEntry[]
   toasts: Toast[]
+  commandDraft: CustomCommandDraft | null
+  imageAttached: boolean
+  reportContent: { format: 'html' | 'md'; content: string } | null
 }
 
 const initial: JarvisState = {
@@ -65,6 +68,9 @@ const initial: JarvisState = {
   memoriesOpen: false,
   memories: [],
   toasts: [],
+  commandDraft: null,
+  imageAttached: false,
+  reportContent: null,
 }
 
 export function useAnimState() {
@@ -125,6 +131,10 @@ export function useAnimState() {
           return { ...prev, textVisible: !prev.textVisible }
         case 'memories':
           return { ...prev, memories: event.memories }
+        case 'command_compose':
+          return { ...prev, commandDraft: event.draft }
+        case 'report':
+          return { ...prev, reportContent: { format: event.format, content: event.content } }
         default:
           return prev
       }
@@ -141,6 +151,8 @@ export function useAnimState() {
   const toggleTextVisible = useCallback(() => setState(prev => ({ ...prev, textVisible: !prev.textVisible })), [])
   const toggleMemories = useCallback(() => setState(prev => ({ ...prev, memoriesOpen: !prev.memoriesOpen })), [])
   const dismissToast = useCallback((id: number) => setState(prev => ({ ...prev, toasts: prev.toasts.filter(t => t.id !== id) })), [])
+  const closeCommand = useCallback(() => setState(prev => ({ ...prev, commandDraft: null })), [])
+  const clearReport = useCallback(() => setState(prev => ({ ...prev, reportContent: null })), [])
 
-  return { state, handleEvent, toggleDashboard, toggleSettings, clearError, closeCompose, closeViewer, openCompose, closeEvent, toggleTextVisible, toggleMemories, dismissToast }
+  return { state, handleEvent, toggleDashboard, toggleSettings, clearError, closeCompose, closeViewer, openCompose, closeEvent, toggleTextVisible, toggleMemories, dismissToast, closeCommand, clearReport }
 }

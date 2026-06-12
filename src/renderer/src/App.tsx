@@ -18,14 +18,20 @@ import { ListeningIndicator } from './components/ListeningIndicator'
 import { EmailComposer } from './components/EmailComposer'
 import { EmailViewer } from './components/EmailViewer'
 import { EventEditor } from './components/EventEditor'
+import { CommandEditor } from './components/CommandEditor'
+import { ReportPanel } from './components/ReportPanel'
 import type { BackendEvent, EmailDraft } from '../../backend/types'
 import './styles/global.css'
 
 export default function App(): JSX.Element {
-  const { state, handleEvent, toggleDashboard, toggleSettings, clearError, closeCompose, closeViewer, openCompose, closeEvent, toggleTextVisible, toggleMemories, dismissToast } = useAnimState()
+  const { state, handleEvent, toggleDashboard, toggleSettings, clearError, closeCompose, closeViewer, openCompose, closeEvent, toggleTextVisible, toggleMemories, dismissToast, closeCommand, clearReport } = useAnimState()
 
   const onEvent = useCallback((event: BackendEvent) => {
     handleEvent(event)
+
+    if (event.type === 'hotkey_changed') {
+      ;(window as any).jarvis?.setHotkey?.(event.hotkey)
+    }
 
     if (event.type === 'audio') {
       const audioData = event.data as unknown as ArrayBuffer
@@ -139,12 +145,35 @@ export default function App(): JSX.Element {
     if (state.memoriesOpen) send({ type: 'get_memories' })
   }, [state.memoriesOpen, send])
 
+  // Screenshot hotkey (main process) → forward capture to the backend
+  useEffect(() => {
+    ;(window as any).jarvis?.onScreenshotCaptured?.((data: { imageBase64: string; mimeType: string }) => {
+      send({ type: 'image_attach', imageBase64: data.imageBase64, mimeType: data.mimeType })
+    })
+  }, [send])
+
+  // Drag-and-drop image attach
+  const handleDragOver = (e: React.DragEvent): void => { e.preventDefault(); e.dataTransfer.dropEffect = 'copy' }
+  const handleDrop = useCallback((e: React.DragEvent) => {
+    e.preventDefault()
+    const file = e.dataTransfer.files[0]
+    if (!file || !file.type.startsWith('image/')) return
+    const reader = new FileReader()
+    reader.onload = () => {
+      const result = reader.result as string
+      const base64 = result.split(',')[1]
+      if (!base64) return
+      send({ type: 'image_attach', imageBase64: base64, mimeType: file.type })
+    }
+    reader.readAsDataURL(file)
+  }, [send])
+
   // Only block input while a request is in flight; typing while Jarvis is
   // speaking (or listening) is fine.
   const busy = state.anim === 'thinking'
 
   return (
-    <div style={{ width: '100vw', height: '100vh', background: '#ddefff', position: 'relative' }}>
+    <div style={{ width: '100vw', height: '100vh', background: '#ddefff', position: 'relative' }} onDragOver={handleDragOver} onDrop={handleDrop}>
       <ParticleRing state={state.anim} amplitude={amplitude} />
       <div className="grid-bg" />
       <TitleBar />
@@ -203,7 +232,10 @@ export default function App(): JSX.Element {
           draft={state.compose}
           onSend={d => { send({ type: 'email_send', draft: d }); closeCompose() }}
           onSaveDraft={d => { send({ type: 'email_draft_save', draft: d }); closeCompose() }}
-          onClose={closeCompose}
+          onClose={() => {
+            send({ type: 'email_compose_dismissed', draft: state.compose! })
+            closeCompose()
+          }}
         />
       )}
       {state.viewer && (
@@ -225,6 +257,16 @@ export default function App(): JSX.Element {
           event={state.eventDraft}
           onCreate={ev => { send({ type: 'event_create', event: ev }); closeEvent() }}
           onClose={closeEvent}
+        />
+      )}
+      {state.commandDraft && (
+        <CommandEditor
+          draft={state.commandDraft}
+          onSave={d => { send({ type: 'command_save', draft: d }); closeCommand() }}
+          onClose={() => {
+            send({ type: 'command_compose_dismissed', draft: state.commandDraft! })
+            closeCommand()
+          }}
         />
       )}
       <AgentCards agents={state.agents} onClose={(id) => send({ type: 'agent_close', id })} />
@@ -252,6 +294,7 @@ export default function App(): JSX.Element {
         onClose={toggleMemories}
         onDelete={(id) => send({ type: 'delete_memory', id })}
       />
+      <ReportPanel content={state.reportContent} onClose={clearReport} />
     </div>
   )
 }
