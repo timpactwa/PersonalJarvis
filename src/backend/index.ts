@@ -185,6 +185,10 @@ let _activeWs: WebSocket | null = null
 let rendererBuild = 'UNKNOWN (no __hello)'
 let isProcessing = false
 
+// Image attached by the user (drag-drop or screenshot hotkey) — consumed by
+// the next conversation turn, which is forced onto Claude for vision.
+let pendingImage: { imageBase64: string; mimeType: string } | null = null
+
 export function broadcast(event: BackendEvent): void {
   if (!_activeWs || _activeWs.readyState !== WebSocket.OPEN) return
   const msg = event.type === 'audio' ? event.data : JSON.stringify(event)
@@ -459,6 +463,11 @@ function handleRendererEvent(event: RendererEvent): void {
     }
     return
   }
+  if (event.type === 'image_attach') {
+    pendingImage = { imageBase64: event.imageBase64, mimeType: event.mimeType }
+    broadcast({ type: 'transcript', role: 'assistant', text: 'Image attached — ask me anything about it.', partial: false })
+    return
+  }
   eventHandlers.forEach(h => h(event))
 }
 
@@ -666,12 +675,15 @@ async function runConversation(userText: string): Promise<void> {
     console.error('[memory] retrieval error (continuing without memories):', err)
   }
 
-  const { text, model, inputTokens, outputTokens, pendingMemory, pendingEntities } = await chat(
-    userText,
-    conversationHistory,
-    topMems,
-    broadcast,
-  )
+  const attachedImage = pendingImage
+  pendingImage = null  // consume immediately
+
+  const useVision = !!attachedImage?.imageBase64
+  if (useVision) console.error('[pipeline] vision turn — forced Claude')
+
+  const { text, model, inputTokens, outputTokens, pendingMemory, pendingEntities } = useVision
+    ? await chatClaude(userText, conversationHistory, topMems, broadcast, attachedImage!.imageBase64)
+    : await chat(userText, conversationHistory, topMems, broadcast)
 
   // Re-strip handles raw text from providers that don't pre-strip (e.g. Ollama); no-op for Groq/Claude.
   const cleaned = stripResponseTags(text)
