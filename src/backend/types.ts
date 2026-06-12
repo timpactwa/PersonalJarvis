@@ -90,6 +90,7 @@ export type BackendEvent =
   | { type: 'usage'; daily: UsagePoint[]; byModel: ModelUsage[] }
   | { type: 'settings'; settings: Settings }
   | { type: 'hotkey_changed'; hotkey: string }
+  | { type: 'screenshot_hotkey_changed'; hotkey: string }
   | { type: 'command_compose'; draft: CustomCommandDraft }
   | { type: 'email_compose'; draft: EmailDraft }
   | { type: 'email_view'; emails: EmailMessage[] }
