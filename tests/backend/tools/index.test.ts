@@ -13,7 +13,7 @@ vi.mock('../../../src/backend/tools/launcher', () => ({
 vi.mock('../../../src/backend/tools/gmail', () => ({
   gmailToolDefs: [{ name: 'gmail_search', description: 'search', input_schema: { type: 'object', properties: {}, required: [] } }],
   calendarToolDefs: [{ name: 'calendar_list', description: 'list', input_schema: { type: 'object', properties: {}, required: [] } }],
-  handleGmailTool: vi.fn(async () => 'gmail result'),
+  handleGmailTool: vi.fn(async () => 'email sent'),
 }))
 
 vi.mock('../../../src/backend/tools/execute', () => ({
@@ -55,8 +55,27 @@ vi.mock('../../../src/backend/tools/jarvis', () => ({
   handleJarvisTool: vi.fn(async () => 'jarvis result'),
 }))
 
+vi.mock('../../../src/backend/tools/vision', () => ({
+  visionToolDefs: [{ name: 'jarvis_screenshot', description: 'screenshot', input_schema: { type: 'object', properties: {}, required: [] } }],
+  handleVisionTool: vi.fn(async () => 'screenshot result'),
+}))
+
+vi.mock('../../../src/backend/tools/github', () => ({
+  githubToolDefs: [{ name: 'github_pr_list', description: 'list prs', input_schema: { type: 'object', properties: {}, required: [] } }],
+  handleGithubTool: vi.fn(async () => 'github result'),
+}))
+
+vi.mock('../../../src/backend/tools/spotify', () => ({
+  spotifyToolDefs: [{ name: 'spotify_play', description: 'play', input_schema: { type: 'object', properties: {}, required: [] } }],
+  handleSpotifyTool: vi.fn(async () => 'spotify result'),
+}))
+
 vi.mock('../../../src/backend/memory/db', () => ({
   insertUserEvent: vi.fn(),
+}))
+
+vi.mock('../../../src/backend/events', () => ({
+  emitEvent: vi.fn(),
 }))
 
 beforeEach(() => {
@@ -199,6 +218,15 @@ describe('handleTool dispatch', () => {
     const { handleTool } = await import('../../../src/backend/tools/index')
     await expect(handleTool('unknown_tool', {})).rejects.toThrow('Unknown tool: unknown_tool')
   })
+
+  it('emits an error event when tool name is unknown', async () => {
+    const { emitEvent } = await import('../../../src/backend/events')
+    const { handleTool } = await import('../../../src/backend/tools/index')
+    await expect(handleTool('nonexistent_tool', {})).rejects.toThrow()
+    expect(vi.mocked(emitEvent)).toHaveBeenCalledWith(
+      expect.objectContaining({ type: 'error' }),
+    )
+  })
 })
 
 describe('handleTool preference tracking', () => {
@@ -230,5 +258,25 @@ describe('handleTool preference tracking', () => {
     const { handleTool } = await import('../../../src/backend/tools/index')
     const result = await handleTool('fs_read', { path: 'file.txt' })
     expect(result).toBe('fs result')
+  })
+})
+
+describe('handleTool gmail guard', () => {
+  it('blocks gmail_compose when userText is not an explicit compose request', async () => {
+    const { handleTool } = await import('../../../src/backend/tools/index')
+    const result = await handleTool('gmail_compose', {}, { userText: 'remind me to email bob later' })
+    expect(result).toContain('No composer opened')
+  })
+
+  it('allows gmail_compose when userText is an explicit compose request', async () => {
+    const { handleTool } = await import('../../../src/backend/tools/index')
+    const result = await handleTool('gmail_compose', {}, { userText: 'send an email to bob' })
+    expect(result).toBe('email sent')
+  })
+
+  it('allows gmail_compose when no userText context provided', async () => {
+    const { handleTool } = await import('../../../src/backend/tools/index')
+    const result = await handleTool('gmail_compose', {})
+    expect(result).toBe('email sent')
   })
 })

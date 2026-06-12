@@ -45,7 +45,7 @@ import { chat as chatOllama } from './ollama'
 // If Claude rate-limits, Groq catches it.
 const TOOL_KEYWORDS_ROUTE = [
   'email', 'gmail', 'calendar', 'file', 'folder', 'search', 'send', 'find',
-  'launch', 'open', 'read', 'write', 'spotify', 'chrome', 'discord', 'vscode', 'rivals',
+  'launch', 'read', 'write', 'spotify', 'chrome', 'discord', 'vscode', 'rivals',
   'code', 'terminal', 'powershell', 'download', 'upload', 'run', 'execute',
   // web search triggers
   'web', 'internet', 'weather', 'news', 'research', 'google',
@@ -82,8 +82,9 @@ function claudeWithGroqFallback(
   history: Message[],
   memories: string[],
   broadcast: (e: BackendEvent) => void,
+  forceModel?: string,
 ) {
-  return chatClaude(userText, history, memories, broadcast).catch((err: unknown) => {
+  return chatClaude(userText, history, memories, broadcast, undefined, undefined, forceModel).catch((err: unknown) => {
     const msg = err instanceof Error ? err.message : String(err)
     const rateLimited = msg.includes('429') || msg.includes('rate_limit') || msg.includes('usage')
     if (rateLimited && process.env.GROQ_API_KEY) {
@@ -123,10 +124,17 @@ function chat(
     return claudeWithGroqFallback(userText, history, memories, broadcast)
   }
 
-  // auto — smart routing (original behaviour)
-  if (process.env.GROQ_API_KEY && needsTool(userText)) {
-    console.error('[pipeline] tool request — using Groq')
-    return chatGroq(userText, history, memories, broadcast)
+  // auto — tool requests → Haiku (reliable tool use) → Groq fallback on rate limit
+  //        conversational → smart Claude routing (Fable/Haiku by length)
+  if (needsTool(userText)) {
+    if (isChatAvailable()) {
+      console.error('[pipeline] tool request — using Haiku')
+      return claudeWithGroqFallback(userText, history, memories, broadcast, 'claude-haiku-4-5-20251001')
+    }
+    if (process.env.GROQ_API_KEY) {
+      console.error('[pipeline] tool request — using Groq (no Claude key)')
+      return chatGroq(userText, history, memories, broadcast)
+    }
   }
   if (isChatAvailable()) {
     console.error('[pipeline] conversational — using Claude')

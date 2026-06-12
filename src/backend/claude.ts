@@ -1,7 +1,6 @@
 import Anthropic from '@anthropic-ai/sdk'
 import type { BackendEvent } from './types'
 import { stripResponseTags, visibleStreamingText } from './responseTags'
-import { isExplicitEmailComposeRequest } from './toolGuards'
 import { getTools, handleTool } from './tools/index'
 import { getSettings } from './memory/settings'
 import { PROFILE_AND_MEMORY_NOTE } from './prompt'
@@ -51,7 +50,7 @@ CAPABILITIES — infer which tool to use from the user's natural language, never
 • Read/change Jarvis settings (provider, voice, hotkey, profile) → jarvis_get_settings / jarvis_set_settings
 • Usage, spending, token counts, rate limits → jarvis_get_usage (never web_search for your own usage)
 • GitHub — PRs, issues, commits, repo status, write PR descriptions → github_pr_list / github_pr_view / github_issue_list / github_commit_log / github_repo_status / github_pr_describe
-• Spotify — control playback, search, queue; connect account → spotify_auth / spotify_play / spotify_pause / spotify_next / spotify_prev / spotify_volume / spotify_search / spotify_queue / spotify_current
+• Spotify — control playback, search, queue; connect account → spotify_auth / spotify_play / spotify_pause / spotify_next / spotify_prev / spotify_volume / spotify_search / spotify_queue / spotify_current; list user's own playlists → spotify_my_playlists. For "play my [X] playlist" use spotify_play with type:"playlist" — it matches against the user's library automatically. Use spotify_my_playlists when user asks what playlists they have.
 • Open Spotify or GitHub visual panel → jarvis_open_panel (use when user says "show", "pull up", "open dashboard", "let me see")
 
 PERSONAL KNOWLEDGE — the user's context is injected automatically. When the user mentions someone by first name only, that person's details will appear in your context. Use it naturally without announcing it.
@@ -72,7 +71,10 @@ RULES:
 - Use tools proactively — always attempt the tool call first, never preemptively refuse.
 - Google (Gmail + Calendar) credentials are configured on this system — always call the tool.
 - Only report a capability missing if the tool itself throws an error.
-- Never say "Certainly!" or "Of course!" — just answer directly.` + PROFILE_AND_MEMORY_NOTE
+- Never say "Certainly!" or "Of course!" — just answer directly.
+- When a tool returns an error implying a missing prerequisite, handle it automatically — the user expects results, not instructions. E.g. Spotify "no active device" is handled by the tool itself (auto-launches Spotify and retries) — report the final outcome only.
+- Chain tools intelligently across multiple steps. If step 1 fails in a recoverable way, resolve the dependency and continue — don't stop and explain the failure to the user.
+- Never narrate your plan. Execute and report the result concisely.` + PROFILE_AND_MEMORY_NOTE
 
 export interface Message {
   role: 'user' | 'assistant'
@@ -125,9 +127,10 @@ export async function chat(
   broadcast: (e: BackendEvent) => void,
   imageBase64?: string,
   imageMimeType?: string,
+  forceModel?: string,
 ): Promise<ChatResult> {
   const client = getClient()
-  const model = selectModel(userText)
+  const model = forceModel ?? selectModel(userText)
 
   if (imageBase64) console.error('[claude] vision turn — image attached')
 
@@ -190,13 +193,7 @@ export async function chat(
     const toolResults: Anthropic.ToolResultBlockParam[] = await Promise.all(
       toolBlocks.map(async (b) => {
         try {
-          if (b.name === 'gmail_compose' && !isExplicitEmailComposeRequest(userText)) {
-            return { type: 'tool_result' as const, tool_use_id: b.id, content: 'No composer opened — user did not ask for a new email.' }
-          }
-          const input = b.name === 'gmail_compose'
-            ? { ...(b.input as Record<string, unknown>), _suppressUi: false }
-            : b.input as Record<string, unknown>
-          const result = await handleTool(b.name, input)
+          const result = await handleTool(b.name, b.input as Record<string, unknown>, { userText })
           return { type: 'tool_result' as const, tool_use_id: b.id, content: result }
         } catch (err) {
           return { type: 'tool_result' as const, tool_use_id: b.id, content: `Error: ${String(err)}`, is_error: true }

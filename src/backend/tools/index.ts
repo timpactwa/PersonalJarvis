@@ -11,6 +11,8 @@ import { visionToolDefs, handleVisionTool } from './vision'
 import { githubToolDefs, handleGithubTool } from './github'
 import { spotifyToolDefs, handleSpotifyTool } from './spotify'
 import { insertUserEvent } from '../memory/db'
+import { isExplicitEmailComposeRequest } from '../toolGuards'
+import { emitEvent } from '../events'
 import type { Tool } from '@anthropic-ai/sdk/resources'
 
 export function getTools(): Tool[] {
@@ -68,7 +70,19 @@ export function getToolsForAgent(): Tool[] {
   ] as Tool[]
 }
 
-export async function handleTool(name: string, input: Record<string, unknown>): Promise<string> {
+export async function handleTool(
+  name: string,
+  input: Record<string, unknown>,
+  ctx?: { userText?: string },
+): Promise<string> {
+  // Gmail compose guard — must be an explicit user request
+  if (name === 'gmail_compose') {
+    if (ctx?.userText && !isExplicitEmailComposeRequest(ctx.userText)) {
+      return 'No composer opened — the user did not ask for a new email.'
+    }
+    input = { ...input, _suppressUi: false }
+  }
+
   let result: string
 
   if (name.startsWith('fs_'))             result = await handleFilesystemTool(name, input as Record<string, string>)
@@ -82,11 +96,16 @@ export async function handleTool(name: string, input: Record<string, unknown>): 
   else if (name === 'jarvis_screenshot')  result = await handleVisionTool(name, input)
   else if (name.startsWith('jarvis_'))    result = await handleJarvisTool(name, input)
   else if (name.startsWith('command_'))   result = await handleCommandTool(name, input)
-  else if (name.startsWith('github_'))   result = await handleGithubTool(name, input)
-  else if (name.startsWith('spotify_'))  result = await handleSpotifyTool(name, input)
-  else throw new Error(`Unknown tool: ${name}`)
+  else if (name.startsWith('github_'))    result = await handleGithubTool(name, input)
+  else if (name.startsWith('spotify_'))   result = await handleSpotifyTool(name, input)
+  else {
+    const msg = `Unknown tool: ${name}`
+    console.error('[tools]', msg)
+    emitEvent({ type: 'error', message: `Jarvis tried to call an unknown tool "${name}" — this is a bug.` })
+    throw new Error(msg)
+  }
 
-  // Preference learning — track usage (fire-and-forget, non-critical)
+  // Preference learning (fire-and-forget)
   try {
     if (name === 'app_launch') {
       insertUserEvent('tool_used', `app_launch:${String(input.name ?? '')}`)

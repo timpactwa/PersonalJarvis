@@ -2,7 +2,6 @@ import type { BackendEvent } from './types'
 import { getToolsForGroq, handleTool } from './tools/index'
 import { PROFILE_AND_MEMORY_NOTE } from './prompt'
 import { stripResponseTags } from './responseTags'
-import { isExplicitEmailComposeRequest } from './toolGuards'
 
 const FORMAT_GUARD = `IMPORTANT: When calling tools, use the API's structured tool_calls JSON format only. Never emit XML function syntax like <function=name>{...}</function>. Only respond with plain text when no tool is needed.
 
@@ -25,7 +24,7 @@ CAPABILITIES — infer which tool to use from the user's natural language, never
 • Read/change Jarvis settings (provider, voice, hotkey, profile) → jarvis_get_settings / jarvis_set_settings
 • Usage, spending, token counts, rate limits → jarvis_get_usage (never web_search for your own usage)
 • GitHub — list/view PRs, issues, commits, repo status → github_pr_list / github_pr_view / github_issue_list / github_commit_log / github_repo_status
-• Spotify — play, pause, skip, volume, search, queue, what's playing → spotify_play / spotify_pause / spotify_next / spotify_prev / spotify_volume / spotify_search / spotify_queue / spotify_current
+• Spotify — play, pause, skip, volume, search, queue, what's playing → spotify_play / spotify_pause / spotify_next / spotify_prev / spotify_volume / spotify_search / spotify_queue / spotify_current; list user's own playlists → spotify_my_playlists. When user says "play my [name] playlist", call spotify_play with type:"playlist" — it auto-searches their library first.
 • Open Spotify or GitHub visual panel → jarvis_open_panel (use when user says "show", "pull up", "open dashboard", "let me see")
 
 IMPORTANT: Google (Gmail + Calendar) credentials ARE configured on this system. Always call the gmail_* and calendar_* tools directly — never refuse or say they are unavailable.
@@ -42,7 +41,10 @@ RULES:
 - gmail_compose ONLY when the user explicitly asks to send/draft/compose/write an email NOW — never for "I sent an email", "remember this email", or past-tense statements.
 - Always attempt tool calls first — never preemptively refuse.
 - Only report a capability missing if the tool itself throws an error.
-- Never say "Certainly!" or "Of course!" — just answer directly.` + PROFILE_AND_MEMORY_NOTE
+- Never say "Certainly!" or "Of course!" — just answer directly.
+- When a tool returns an error that implies a missing prerequisite, handle it: e.g. if Spotify says no active device, the tool auto-launches it — you don't need to tell the user to open Spotify manually.
+- Chain tools intelligently: if step 1 fails in a recoverable way, fix the precondition and proceed — don't stop and ask the user to retry.
+- Never narrate what you are about to do. Just do it and report the result concisely.` + PROFILE_AND_MEMORY_NOTE
 
 const GROQ_BASE_URL = 'https://api.groq.com/openai/v1'
 const DEFAULT_MODEL = 'llama-3.3-70b-versatile'
@@ -244,9 +246,6 @@ export async function chat(
 
       const recovered = res.status === 400 ? parseFailedToolGeneration(body) : null
       if (recovered) {
-        if (recovered.name === 'gmail_compose' && !isExplicitEmailComposeRequest(userText)) {
-          throw new Error(`Groq HTTP ${res.status}: ${body || '(no body)'}`)
-        }
         console.error(`[groq] recovered tool call from failed_generation: ${recovered.name}`)
         broadcast({ type: 'transcript', role: 'assistant', text: `→ ${recovered.name.replace(/_/g, ' ')}…`, partial: true })
 
@@ -317,11 +316,5 @@ export async function chat(
 }
 
 async function runToolCall(name: string, args: Record<string, unknown>, userText: string): Promise<string> {
-  if (name === 'gmail_compose' && !isExplicitEmailComposeRequest(userText)) {
-    return 'No composer opened — the user did not ask for a new email.'
-  }
-  if (name === 'gmail_compose') {
-    return handleTool(name, { ...args, _suppressUi: false })
-  }
-  return handleTool(name, args)
+  return handleTool(name, args, { userText })
 }

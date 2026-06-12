@@ -201,7 +201,7 @@ describe('groq chat', () => {
 
     const { chat } = await import('../../src/backend/groq')
     const result = await chat('send email to mom', [], [], () => {})
-    expect(handleTool).toHaveBeenCalledWith('gmail_compose', { to: 'mom', subject: 'Hello', body: 'Hi there', _suppressUi: false })
+    expect(handleTool).toHaveBeenCalledWith('gmail_compose', { to: 'mom', subject: 'Hello', body: 'Hi there' }, { userText: 'send email to mom' })
     expect(result.text).toBe('Email composer is ready.')
   })
 })
