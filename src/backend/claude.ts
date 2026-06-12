@@ -25,7 +25,7 @@ const TOOL_KEYWORDS = [
 //                    content, or chains that have already consumed ≥4 tool calls
 const MODEL_FAST = 'claude-haiku-4-5-20251001'
 const MODEL_SMART = 'claude-sonnet-4-6'
-const MODEL_DEEP = 'claude-fable-5'
+const MODEL_DEEP = 'claude-opus-4-6'
 
 const DEEP_KEYWORDS = ['plan', 'analyze', 'analyse', 'compare', 'summarize', 'summarise', 'research', 'write']
 // A deep keyword alone isn't enough — the request must carry substantive
