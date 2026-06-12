@@ -35,6 +35,14 @@ export interface UsagePoint { date: string; tokens: number; cost: number }
 export interface ModelUsage { model: string; tokens: number; cost: number }
 export interface MemoryEntry { id: number; text: string; createdAt: number }
 
+export interface GithubRow {
+  title: string
+  subtitle?: string
+  meta?: string
+  badge?: string
+  badgeColor?: string
+}
+
 export type CustomCommandKind = 'exe' | 'uri' | 'shell'
 
 export interface CustomCommand {
@@ -106,6 +114,9 @@ export type BackendEvent =
   | { type: 'screenshot_request'; prompt: string }
   | { type: 'panel_open'; panel: 'spotify' | 'github' }
   | { type: 'quiet_mode_changed'; enabled: boolean }
+  | { type: 'spotify_now_playing'; track?: string; artist?: string; isPlaying: boolean }
+  | { type: 'github_data'; tab: 'STATUS' | 'PRs' | 'ISSUES' | 'COMMITS'; rows: GithubRow[] }
+  | { type: 'plan_preview'; id: string; steps: string[] }
 
 // Events sent from renderer → backend
 export type RendererEvent =
@@ -127,3 +138,5 @@ export type RendererEvent =
   | { type: 'get_memories' }
   | { type: 'delete_memory'; id: number }
   | { type: 'image_attach'; imageBase64: string; mimeType: string }
+  | { type: 'plan_confirmed'; id: string }
+  | { type: 'plan_cancelled'; id: string }
