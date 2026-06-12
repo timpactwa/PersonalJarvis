@@ -8,11 +8,11 @@ interface Props {
 export function AgentLogModal({ agent, onClose }: Props): JSX.Element {
   return (
     <>
-      <div onClick={onClose} style={{ position: 'absolute', inset: 0, background: 'rgba(200,220,240,0.3)', backdropFilter: 'blur(3px)', zIndex: 139 }} />
+      <div onClick={onClose} style={{ position: 'fixed', inset: 0, background: 'rgba(200,220,240,0.3)', backdropFilter: 'blur(3px)', zIndex: 139 }} />
       <div
         className="no-drag"
         style={{
-          position: 'absolute', top: '50%', left: '50%', transform: 'translate(-50%, -50%)',
+          position: 'fixed', top: '50%', left: '50%', transform: 'translate(-50%, -50%)',
           width: 'min(560px, 84vw)', maxHeight: '70vh', overflowY: 'auto',
           background: 'rgba(255,255,255,0.97)', border: '1px solid rgba(3,105,161,0.18)', borderRadius: 12,
           padding: 24, zIndex: 140, fontFamily: 'var(--font-hud)', color: 'var(--text)',
