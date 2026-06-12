@@ -31,12 +31,12 @@ const DEEP_KEYWORDS = ['plan', 'analyze', 'analyse', 'compare', 'summarize', 'su
 // A deep keyword alone isn't enough — the request must carry substantive
 // content. 9+ words separates "what should I plan for today" (Fast) from
 // "plan out the architecture for a new auth system with oauth and jwt" (Deep).
-const DEEP_MIN_WORDS = 9
+const DEEP_MIN_WORDS = 12
 
 // Anything touching these surfaces needs at least Sonnet.
 const SMART_SIGNALS = [
   'email', 'gmail', 'github', 'pull request', 'issue', 'commit', 'repo',
-  'calendar_create', 'execute', 'fs_write',
+  'calendar_create', 'execute', 'fs_write', 'schedule',
 ]
 
 // How many tool-use steps a chain may consume before escalating to Deep.
@@ -83,7 +83,9 @@ export function selectModel(text: string, forceModel?: string, stepCount?: numbe
     lower.includes('spotify') || lower.includes('launch') || lower.includes('open') ||
     lower.includes('play') || lower.includes('pause') || lower.includes('skip') ||
     (lower.includes('weather') && words.length <= 8) ||
-    (lower.includes('search') && words.length <= 10)
+    (/\bsearch\b/.test(lower) && words.length <= 10) ||
+    (lower.includes('read') && words.length <= 8) ||
+    (lower.includes('calendar') && words.length <= 8 && !lower.includes('create') && !lower.includes('add') && !lower.includes('schedule'))
   )) {
     return MODEL_FAST
   }

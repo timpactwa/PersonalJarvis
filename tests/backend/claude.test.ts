@@ -30,6 +30,24 @@ describe('selectModel — auto mode', () => {
     expect(selectModel("what's the weather today")).toBe(HAIKU)
   })
 
+  it('routes short "research X" to Sonnet not Haiku (search substring bug)', () => {
+    // "research" contains "search" — word-boundary check prevents false Fast-tier match
+    expect(selectModel('research machine learning')).toBe(SONNET)
+  })
+
+  it('routes "read config.json" to Haiku', () => {
+    expect(selectModel('read config.json')).toBe(HAIKU)
+  })
+
+  it('routes "list my calendar" to Haiku', () => {
+    expect(selectModel('list my calendar')).toBe(HAIKU)
+  })
+
+  it('routes "schedule a meeting" to Sonnet (not Haiku)', () => {
+    // calendar_create-type requests should stay Smart
+    expect(selectModel('schedule a meeting tomorrow morning with the team')).toBe(SONNET)
+  })
+
   // ── Smart tier ─────────────────────────────────────────────
   it('routes email compose to Sonnet', () => {
     expect(selectModel('send an email to bob about the meeting tomorrow')).toBe(SONNET)
@@ -52,7 +70,7 @@ describe('selectModel — auto mode', () => {
 
   // ── Deep tier ──────────────────────────────────────────────
   it('routes spawn_agent-style research requests to Fable', () => {
-    expect(selectModel('research the top 5 javascript frameworks and compare their performance benchmarks')).toBe(FABLE)
+    expect(selectModel('research the top 5 javascript frameworks and compare their performance benchmarks in detail')).toBe(FABLE)
   })
 
   it('routes explicit spawn_agent / pr_describe mentions to Fable', () => {
@@ -65,7 +83,7 @@ describe('selectModel — auto mode', () => {
   })
 
   it('routes "analyze" with substantive content to Fable', () => {
-    expect(selectModel('analyze the performance bottlenecks in the codebase and suggest improvements')).toBe(FABLE)
+    expect(selectModel('analyze the performance bottlenecks in the codebase and suggest specific improvements to make')).toBe(FABLE)
   })
 
   it('routes "summarize" with substantive content to Fable', () => {
