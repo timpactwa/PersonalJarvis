@@ -1,48 +1,105 @@
 import { describe, it, expect } from 'vitest'
 import { selectModel, isChatAvailable } from '../../src/backend/claude'
 
-describe('selectModel', () => {
-  it('routes short conversational messages to haiku', () => {
-    expect(selectModel('what time is it')).toBe('claude-haiku-4-5-20251001')
-    expect(selectModel('hello jarvis')).toBe('claude-haiku-4-5-20251001')
-    expect(selectModel('good morning')).toBe('claude-haiku-4-5-20251001')
-    expect(selectModel('tell me a joke')).toBe('claude-haiku-4-5-20251001')
+const HAIKU = 'claude-haiku-4-5-20251001'
+const SONNET = 'claude-sonnet-4-6'
+const FABLE = 'claude-fable-5'
+
+describe('selectModel — auto mode', () => {
+  // ── Fast tier ──────────────────────────────────────────────
+  it('routes short conversational to Haiku', () => {
+    expect(selectModel('hello')).toBe(HAIKU)
+    expect(selectModel('what time is it')).toBe(HAIKU)
+    expect(selectModel('good morning')).toBe(HAIKU)
+    expect(selectModel('tell me a joke')).toBe(HAIKU)
   })
 
-  it('routes messages with email/file tool keywords to sonnet', () => {
-    expect(selectModel('check my email')).toBe('claude-sonnet-4-6')
-    expect(selectModel('open spotify')).toBe('claude-sonnet-4-6')
-    expect(selectModel('find the file')).toBe('claude-sonnet-4-6')
-    expect(selectModel('remember that I prefer mornings')).toBe('claude-sonnet-4-6')
+  it('routes single app_launch to Haiku', () => {
+    expect(selectModel('launch spotify')).toBe(HAIKU)
+    expect(selectModel('launch chrome')).toBe(HAIKU)
   })
 
-  it('routes messages with web search keywords to sonnet', () => {
-    expect(selectModel('search the web for news')).toBe('claude-sonnet-4-6')
-    expect(selectModel("what's the weather today")).toBe('claude-sonnet-4-6')
-    expect(selectModel('look it up on the internet')).toBe('claude-sonnet-4-6')
-    expect(selectModel('google this for me')).toBe('claude-sonnet-4-6')
-    expect(selectModel('research this topic')).toBe('claude-sonnet-4-6')
+  it('routes spotify control to Haiku', () => {
+    expect(selectModel('pause the music')).toBe(HAIKU)
+    expect(selectModel('play my workout playlist')).toBe(HAIKU)
+    expect(selectModel('skip this song')).toBe(HAIKU)
   })
 
-  it('routes messages with additional tool keywords to sonnet', () => {
-    expect(selectModel('run this script')).toBe('claude-sonnet-4-6')
-    expect(selectModel('execute the file')).toBe('claude-sonnet-4-6')
-    expect(selectModel('open discord')).toBe('claude-sonnet-4-6')
-    expect(selectModel('write some code for me')).toBe('claude-sonnet-4-6')
+  it('routes simple web search to Haiku', () => {
+    expect(selectModel('search for the weather today')).toBe(HAIKU)
+    expect(selectModel("what's the weather today")).toBe(HAIKU)
   })
 
-  it('routes long messages (over 15 words) to sonnet', () => {
-    const long = 'Can you please summarize what I did last week based on my notes in the documents folder?'
-    expect(selectModel(long)).toBe('claude-sonnet-4-6')
+  // ── Smart tier ─────────────────────────────────────────────
+  it('routes email compose to Sonnet', () => {
+    expect(selectModel('send an email to bob about the meeting tomorrow')).toBe(SONNET)
+    expect(selectModel('check my email')).toBe(SONNET)
   })
 
-  it('returns claude-fable-5 when preference is explicitly set to fable', () => {
-    // modelPreference override is only meaningful via settings; unit-level
-    // testing of the default auto path is sufficient here.
-    // The selectModel function reads settings; fable override is tested
-    // end-to-end. We just verify the haiku path still works independently.
-    const result = selectModel('hi')
-    expect(['claude-haiku-4-5-20251001', 'claude-sonnet-4-6', 'claude-fable-5']).toContain(result)
+  it('routes github tools to Sonnet', () => {
+    expect(selectModel('show me the open PRs on this repo')).toBe(SONNET)
+    expect(selectModel('list the open issues on github')).toBe(SONNET)
+    expect(selectModel('show the latest commit')).toBe(SONNET)
+  })
+
+  it('routes medium-length requests to Sonnet', () => {
+    expect(selectModel('read the config file and tell me what ports are configured')).toBe(SONNET)
+  })
+
+  it('routes script execution to Sonnet', () => {
+    expect(selectModel('execute the file')).toBe(SONNET)
+  })
+
+  // ── Deep tier ──────────────────────────────────────────────
+  it('routes spawn_agent-style research requests to Fable', () => {
+    expect(selectModel('research the top 5 javascript frameworks and compare their performance benchmarks')).toBe(FABLE)
+  })
+
+  it('routes explicit spawn_agent / pr_describe mentions to Fable', () => {
+    expect(selectModel('use spawn_agent for this')).toBe(FABLE)
+    expect(selectModel('run pr_describe on my branch')).toBe(FABLE)
+  })
+
+  it('routes "plan" keyword with substantive content to Fable', () => {
+    expect(selectModel('plan out the architecture for a new authentication system with oauth and jwt')).toBe(FABLE)
+  })
+
+  it('routes "analyze" with substantive content to Fable', () => {
+    expect(selectModel('analyze the performance bottlenecks in the codebase and suggest improvements')).toBe(FABLE)
+  })
+
+  it('routes "summarize" with substantive content to Fable', () => {
+    expect(selectModel('summarize all the open issues and group them by priority and estimated complexity')).toBe(FABLE)
+  })
+
+  it('short "plan" does NOT escalate to Fable', () => {
+    // A deep keyword alone is not enough — Fable requires substantive content.
+    const result = selectModel('what should I plan for today')
+    expect(result).not.toBe(FABLE)
+  })
+
+  // ── stepCount escalation ───────────────────────────────────
+  it('escalates to Fable when a chain has consumed ≥4 tool calls', () => {
+    expect(selectModel('pause the music', undefined, 4)).toBe(FABLE)
+    expect(selectModel('pause the music', undefined, 7)).toBe(FABLE)
+  })
+
+  it('does not escalate below 4 steps', () => {
+    expect(selectModel('pause the music', undefined, 3)).toBe(HAIKU)
+    expect(selectModel('pause the music', undefined, 0)).toBe(HAIKU)
+  })
+
+  // ── forceModel override ────────────────────────────────────
+  it('respects forceModel override', () => {
+    expect(selectModel('hello', FABLE)).toBe(FABLE)
+  })
+
+  it('respects haiku preference override', () => {
+    expect(selectModel('analyze everything deeply and write a comprehensive report', HAIKU)).toBe(HAIKU)
+  })
+
+  it('forceModel beats stepCount escalation', () => {
+    expect(selectModel('pause the music', HAIKU, 9)).toBe(HAIKU)
   })
 })
 

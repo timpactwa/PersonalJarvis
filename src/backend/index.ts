@@ -124,12 +124,13 @@ function chat(
     return claudeWithGroqFallback(userText, history, memories, broadcast)
   }
 
-  // auto — tool requests → Haiku (reliable tool use) → Groq fallback on rate limit
-  //        conversational → smart Claude routing (Fable/Haiku by length)
+  // auto — tool requests → Claude (tiered Haiku/Sonnet/Fable via selectModel)
+  //        → Groq fallback on rate limit
+  //        conversational → Claude tiered routing as well
   if (needsTool(userText)) {
     if (isChatAvailable()) {
-      console.error('[pipeline] tool request — using Haiku')
-      return claudeWithGroqFallback(userText, history, memories, broadcast, 'claude-haiku-4-5-20251001')
+      console.error('[pipeline] tool request — using Claude (tiered routing)')
+      return claudeWithGroqFallback(userText, history, memories, broadcast)
     }
     if (process.env.GROQ_API_KEY) {
       console.error('[pipeline] tool request — using Groq (no Claude key)')

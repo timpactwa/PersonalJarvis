@@ -18,17 +18,78 @@ const TOOL_KEYWORDS = [
   'discord', 'code', 'run', 'execute',
 ]
 
-export function selectModel(text: string): string {
+// Three-tier model routing:
+//   Fast  (Haiku)  — single quick tool calls + short conversational
+//   Smart (Sonnet) — email, GitHub, multi-step tools, medium complexity
+//   Deep  (Fable)  — agentic research, plan/analyze/summarize with substantive
+//                    content, or chains that have already consumed ≥4 tool calls
+const MODEL_FAST = 'claude-haiku-4-5-20251001'
+const MODEL_SMART = 'claude-sonnet-4-6'
+const MODEL_DEEP = 'claude-fable-5'
+
+const DEEP_KEYWORDS = ['plan', 'analyze', 'analyse', 'compare', 'summarize', 'summarise', 'research', 'write']
+// A deep keyword alone isn't enough — the request must carry substantive
+// content. 9+ words separates "what should I plan for today" (Fast) from
+// "plan out the architecture for a new auth system with oauth and jwt" (Deep).
+const DEEP_MIN_WORDS = 9
+
+// Anything touching these surfaces needs at least Sonnet.
+const SMART_SIGNALS = [
+  'email', 'gmail', 'github', 'pull request', 'issue', 'commit', 'repo',
+  'calendar_create', 'execute', 'fs_write',
+]
+
+// How many tool-use steps a chain may consume before escalating to Deep.
+export const ESCALATION_STEP = 4
+
+export function selectModel(text: string, forceModel?: string, stepCount?: number): string {
+  // 1. Explicit caller override always wins
+  if (forceModel) return forceModel
+
+  // 2. Settings preference — tiered routing only applies in 'auto' mode
   let pref: 'auto' | 'fable' | 'haiku' = 'auto'
   try { pref = getSettings().modelPreference } catch { /* db not ready in unit context */ }
-  if (pref === 'fable') return 'claude-fable-5'
-  if (pref === 'haiku') return 'claude-haiku-4-5-20251001'
+  if (pref === 'fable') return MODEL_DEEP
+  if (pref === 'haiku') return MODEL_FAST
 
   const lower = text.toLowerCase()
   const words = lower.trim().split(/\s+/)
+
+  // 3. Deep tier — a multi-step chain has already consumed ≥4 tool calls
+  if (stepCount !== undefined && stepCount >= ESCALATION_STEP) return MODEL_DEEP
+
+  // 4. Deep tier — complex reasoning keywords WITH substantive content
+  if (words.length >= DEEP_MIN_WORDS && DEEP_KEYWORDS.some(kw => lower.includes(kw))) {
+    return MODEL_DEEP
+  }
+
+  // 5. Deep tier — explicit agent / PR-describe requests + research-shaped asks
+  if (lower.includes('spawn_agent') || lower.includes('pr_describe')) return MODEL_DEEP
+  if (words.length > 12 && (lower.includes('investigate') || lower.includes('comprehensive'))) {
+    return MODEL_DEEP
+  }
+
+  // 6. Smart tier — email, GitHub, multi-step tool surfaces ("PRs" via word boundary)
+  if (SMART_SIGNALS.some(s => lower.includes(s)) || /\bprs?\b/.test(lower)) {
+    return MODEL_SMART
+  }
+
+  // 7. Fast tier — short conversational, no tool keywords
   const hasToolKeyword = TOOL_KEYWORDS.some(kw => lower.includes(kw))
-  if (words.length <= 15 && !hasToolKeyword) return 'claude-haiku-4-5-20251001'
-  return 'claude-sonnet-4-6'
+  if (words.length <= 15 && !hasToolKeyword) return MODEL_FAST
+
+  // 8. Fast tier — single quick tool actions (launch / spotify / simple search)
+  if (words.length <= 12 && (
+    lower.includes('spotify') || lower.includes('launch') || lower.includes('open') ||
+    lower.includes('play') || lower.includes('pause') || lower.includes('skip') ||
+    (lower.includes('weather') && words.length <= 8) ||
+    (lower.includes('search') && words.length <= 10)
+  )) {
+    return MODEL_FAST
+  }
+
+  // 9. Default — Smart tier for everything else
+  return MODEL_SMART
 }
 
 const SYSTEM_PROMPT = `You are Jarvis, a personal AI assistant running as a desktop overlay. Speak in a polished, concise British manner — helpful and confident without being verbose. Keep responses under 3 sentences unless detail is genuinely needed.
@@ -130,7 +191,8 @@ export async function chat(
   forceModel?: string,
 ): Promise<ChatResult> {
   const client = getClient()
-  const model = forceModel ?? selectModel(userText)
+  // selectModel handles the forceModel override internally (it always wins)
+  let model = selectModel(userText, forceModel)
 
   if (imageBase64) console.error('[claude] vision turn — image attached')
 
@@ -156,6 +218,17 @@ export async function chat(
   let outputTokens = 0
 
   for (let step = 0; step < MAX_STEPS; step++) {
+    // Tier escalation: once a chain has consumed ≥4 tool-use steps the task is
+    // clearly complex — re-select with the step count so Deep tier takes over.
+    // No-op when forceModel or a settings preference is in effect.
+    if (step >= ESCALATION_STEP) {
+      const escalated = selectModel(userText, forceModel, step)
+      if (escalated !== model) {
+        console.error(`[claude] step ${step} — escalating ${model} → ${escalated}`)
+        model = escalated
+      }
+    }
+
     const stream = client.messages.stream({
       model,
       max_tokens: 1024,
