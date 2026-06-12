@@ -677,6 +677,10 @@ async function runConversation(userText: string): Promise<void> {
   const cleaned = stripResponseTags(text)
   const finalText = cleaned.text
 
+  if (cleaned.pendingReport) {
+    broadcast({ type: 'report', format: cleaned.pendingReport.format, content: cleaned.pendingReport.content })
+  }
+
   console.log(`[pipeline] jarvis (${model}): "${finalText.slice(0, 80)}..."`)
 
   conversationHistory.push({ role: 'user', content: userText })

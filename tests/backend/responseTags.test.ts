@@ -62,6 +62,20 @@ describe('stripResponseTags', () => {
     expect(result.text).toContain('Bob')
     expect(result.pendingEntities).toHaveLength(2)
   })
+
+  it('strips [REPORT: html|...] and returns pendingReport', async () => {
+    const { stripResponseTags } = await import('../../src/backend/responseTags')
+    const content = '<h1>Summary</h1>'
+    const result = stripResponseTags(`Here is your report. [REPORT: html|${content}]`)
+    expect(result.text).toBe('Here is your report.')
+    expect(result.pendingReport?.format).toBe('html')
+    expect(result.pendingReport?.content).toBe(content)
+  })
+
+  it('returns null pendingReport when no REPORT tag', async () => {
+    const { stripResponseTags } = await import('../../src/backend/responseTags')
+    expect(stripResponseTags('Hello.').pendingReport).toBeNull()
+  })
 })
 
 describe('visibleStreamingText', () => {
