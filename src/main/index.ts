@@ -1,4 +1,4 @@
-import { app, BrowserWindow, globalShortcut, utilityProcess, ipcMain } from 'electron'
+import { app, BrowserWindow, globalShortcut, utilityProcess, ipcMain, desktopCapturer } from 'electron'
 import { join } from 'path'
 
 let mainWindow: BrowserWindow | null = null
@@ -305,6 +305,27 @@ app.whenReady().then(() => {
     })
     console.log('[main] globalShortcut registered — Alt+Space to toggle recording')
   }
+
+  // Screenshot hotkey — captures the primary screen and ships it to the
+  // renderer, which forwards it to the backend as an image_attach event.
+  const screenshotHotkeyStr = 'Alt+Shift+S'
+  globalShortcut.register(screenshotHotkeyStr, async () => {
+    try {
+      const sources = await desktopCapturer.getSources({
+        types: ['screen'],
+        thumbnailSize: { width: 1920, height: 1080 },
+      })
+      const primary = sources[0]
+      if (!primary) return
+      const png = primary.thumbnail.toPNG()
+      const imageBase64 = png.toString('base64')
+      mainWindow?.webContents.send('screenshot-captured', { imageBase64, mimeType: 'image/png' })
+      console.log('[main] screenshot captured:', png.length, 'bytes')
+    } catch (err) {
+      console.error('[main] screenshot error:', err)
+    }
+  })
+  console.log(`[main] screenshot hotkey registered — ${screenshotHotkeyStr}`)
 
   ipcMain.on('set-hotkey', (_e, _accelerator: string) => { /* reserved */ })
   ipcMain.on('window-minimize', () => mainWindow?.minimize())
