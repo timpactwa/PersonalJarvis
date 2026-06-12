@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import { useWebSocket } from './hooks/useWebSocket'
 import { useAnimState } from './hooks/useAnimState'
 import { ParticleRing } from './components/ParticleRing'
@@ -20,13 +20,27 @@ import { EmailViewer } from './components/EmailViewer'
 import { EventEditor } from './components/EventEditor'
 import { CommandEditor } from './components/CommandEditor'
 import { ReportPanel } from './components/ReportPanel'
+import { SpotifyPanel } from './components/SpotifyPanel'
+import { GitHubPanel } from './components/GitHubPanel'
+import { ImageAttachZone } from './components/ImageAttachZone'
+import PlanPreviewCard from './components/PlanPreviewCard'
 import type { BackendEvent, EmailDraft } from '../../backend/types'
 import './styles/global.css'
 
 export default function App(): JSX.Element {
-  const { state, handleEvent, toggleDashboard, toggleSettings, clearError, closeCompose, closeViewer, openCompose, closeEvent, toggleTextVisible, toggleMemories, dismissToast, closeCommand, clearReport } = useAnimState()
+  const { state, handleEvent, toggleDashboard, toggleSettings, clearError, closeCompose, closeViewer, openCompose, closeEvent, toggleTextVisible, toggleMemories, dismissToast, closeCommand, clearReport, setImageAttached, toggleSpotify, toggleGithub, closePlanPreview } = useAnimState()
+
+  const quietModeRef = useRef(false)
+  quietModeRef.current = state.quietMode
 
   const onEvent = useCallback((event: BackendEvent) => {
+    if (event.type === 'screenshot_request') {
+      // Voice-triggered screenshot (jarvis_screenshot tool): ask the main
+      // process to capture; the result comes back via screenshot-captured IPC.
+      ;(window as any).jarvis?.triggerScreenshot?.()
+      return
+    }
+
     handleEvent(event)
 
     if (event.type === 'hotkey_changed') {
@@ -39,6 +53,10 @@ export default function App(): JSX.Element {
     }
 
     if (event.type === 'audio') {
+      if (quietModeRef.current) {
+        handleEvent({ type: 'state', state: 'idle' })
+        return
+      }
       const audioData = event.data as unknown as ArrayBuffer
       const blob = new Blob([audioData], { type: 'audio/mpeg' })
       const url = URL.createObjectURL(blob)
@@ -155,11 +173,12 @@ export default function App(): JSX.Element {
     const jarvis = (window as any).jarvis
     jarvis?.onScreenshotCaptured?.((data: { imageBase64: string; mimeType: string }) => {
       send({ type: 'image_attach', imageBase64: data.imageBase64, mimeType: data.mimeType })
+      setImageAttached(true)
     })
     return () => {
       jarvis?.offScreenshotCaptured?.()
     }
-  }, [send])
+  }, [send, setImageAttached])
 
   // Drag-and-drop image attach
   const handleDragOver = (e: React.DragEvent): void => { e.preventDefault(); e.dataTransfer.dropEffect = 'copy' }
@@ -173,9 +192,19 @@ export default function App(): JSX.Element {
       const base64 = result.split(',')[1]
       if (!base64) return
       send({ type: 'image_attach', imageBase64: base64, mimeType: file.type })
+      setImageAttached(true)
     }
     reader.readAsDataURL(file)
-  }, [send])
+  }, [send, setImageAttached])
+
+  const handlePlanConfirm = (id: string): void => {
+    send({ type: 'plan_confirmed', id })
+    closePlanPreview()
+  }
+  const handlePlanCancel = (id: string): void => {
+    send({ type: 'plan_cancelled', id })
+    closePlanPreview()
+  }
 
   // Only block input while a request is in flight; typing while Jarvis is
   // speaking (or listening) is fine.
@@ -197,6 +226,12 @@ export default function App(): JSX.Element {
         onStatsClick={toggleDashboard}
         textVisible={state.textVisible}
         onToggleText={toggleTextVisible}
+        spotifyOpen={state.spotifyOpen}
+        githubOpen={state.githubOpen}
+        quietMode={state.quietMode}
+        onToggleSpotify={toggleSpotify}
+        onToggleGithub={toggleGithub}
+        onToggleQuietMode={() => send({ type: 'set_settings', settings: { quietMode: !state.quietMode } })}
       />
       <ErrorToast message={state.errorText} onDismiss={clearError} />
       <CompletionToast toasts={state.toasts} onDismiss={dismissToast} />
@@ -224,6 +259,14 @@ export default function App(): JSX.Element {
         )
       })()}
       <Transcript history={state.history} streamingText={state.streamingText} visible={state.textVisible} />
+      <ImageAttachZone
+        imageAttached={state.imageAttached}
+        onAttach={(base64, mimeType) => {
+          send({ type: 'image_attach', imageBase64: base64, mimeType })
+          setImageAttached(true)
+        }}
+        onClear={() => setImageAttached(false)}
+      />
       <TextInput
         disabled={busy || !connected}
         onSubmit={(text) => send({ type: 'command', text })}
@@ -234,6 +277,13 @@ export default function App(): JSX.Element {
           detail={state.confirm.detail}
           onConfirm={() => send({ type: 'confirm_response', id: state.confirm!.id, approved: true })}
           onCancel={() => send({ type: 'confirm_response', id: state.confirm!.id, approved: false })}
+        />
+      )}
+      {state.planPreview && (
+        <PlanPreviewCard
+          plan={state.planPreview}
+          onConfirm={handlePlanConfirm}
+          onCancel={handlePlanCancel}
         />
       )}
       {state.compose && (
@@ -304,6 +354,8 @@ export default function App(): JSX.Element {
         onDelete={(id) => send({ type: 'delete_memory', id })}
       />
       <ReportPanel content={state.reportContent} onClose={clearReport} />
+      <SpotifyPanel open={state.spotifyOpen} onClose={toggleSpotify} send={send} />
+      <GitHubPanel open={state.githubOpen} onClose={toggleGithub} send={send} />
     </div>
   )
 }

@@ -165,6 +165,7 @@ import {
 import { stripResponseTags } from './responseTags'
 import { markComposeCompleted, markComposeDismissed, clearComposeSuppression } from './toolSession'
 import { closeAgent } from './agents'
+import { resolvePlanPreview } from './planPreview'
 import { getSettings, setSettings } from './memory/settings'
 import { upsertCustomCommand, deleteCustomCommand } from './memory/customCommands'
 import {
@@ -475,6 +476,14 @@ function handleRendererEvent(event: RendererEvent): void {
   if (event.type === 'image_attach') {
     pendingImage = { imageBase64: event.imageBase64, mimeType: event.mimeType }
     broadcast({ type: 'transcript', role: 'assistant', text: 'Image attached — ask me anything about it.', partial: false })
+    return
+  }
+  if (event.type === 'plan_confirmed') {
+    resolvePlanPreview(event.id, true)
+    return
+  }
+  if (event.type === 'plan_cancelled') {
+    resolvePlanPreview(event.id, false)
     return
   }
   eventHandlers.forEach(h => h(event))

@@ -4,6 +4,7 @@ import { stripResponseTags, visibleStreamingText } from './responseTags'
 import { getTools, handleTool } from './tools/index'
 import { getSettings } from './memory/settings'
 import { PROFILE_AND_MEMORY_NOTE } from './prompt'
+import { isDestructiveChain, requestPlanPreview } from './planPreview'
 
 // Note: 'open' is intentionally excluded — it matches too broadly (e.g. "open
 // vs code" is conversational), while concrete launch intents are captured by
@@ -264,6 +265,18 @@ export async function chat(
     broadcast({ type: 'transcript', role: 'assistant', text: `→ ${toolLabel}…`, partial: true })
 
     messages.push({ role: 'assistant', content: finalMsg.content })
+
+    // Plan preview gate — ask user before executing destructive tools
+    if (isDestructiveChain(toolBlocks.map(b => b.name))) {
+      const planId = `plan_${Date.now()}`
+      const steps = toolBlocks.map(b => `${b.name.replace(/_/g, ' ')}: ${JSON.stringify(b.input).slice(0, 80)}`)
+      const confirmed = await requestPlanPreview(planId, steps)
+      if (!confirmed) {
+        fullText = 'Cancelled — no changes were made.'
+        broadcast({ type: 'transcript', role: 'assistant', text: fullText, partial: false })
+        break
+      }
+    }
 
     const toolResults: Anthropic.ToolResultBlockParam[] = await Promise.all(
       toolBlocks.map(async (b) => {
