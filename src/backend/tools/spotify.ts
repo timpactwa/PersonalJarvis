@@ -1,9 +1,11 @@
 import { createHash, randomBytes } from 'crypto'
+import { createServer } from 'http'
+import { emitEvent } from '../events'
 import { getSettings, setSettings } from '../memory/settings'
 
 const SPOTIFY_API = 'https://api.spotify.com/v1'
 const SPOTIFY_TOKEN_URL = 'https://accounts.spotify.com/api/token'
-const REDIRECT_URI = 'http://localhost:8919/spotify-callback'
+const REDIRECT_URI = 'http://127.0.0.1:8919/spotify-callback'
 
 function isTokenExpired(): boolean {
   const { spotifyExpiresAt } = getSettings()
@@ -133,6 +135,11 @@ export const spotifyToolDefs = [
     },
   },
   {
+    name: 'spotify_my_playlists',
+    description: "List the user's own Spotify playlists (saved and created). Use when user asks 'what are my playlists', 'show my playlists', or refers to a playlist by name and you need to find its URI.",
+    input_schema: { type: 'object' as const, properties: {}, required: [] },
+  },
+  {
     name: 'spotify_queue',
     description: 'Add a track to the Spotify play queue. Use for "queue up [song]", "add [song] to queue", "play [song] next".',
     input_schema: {
@@ -148,15 +155,14 @@ export const spotifyToolDefs = [
 
 async function authHandler(): Promise<string> {
   const clientId = process.env.SPOTIFY_CLIENT_ID ?? ''
-  if (!clientId) {
+  const clientSecret = process.env.SPOTIFY_CLIENT_SECRET ?? ''
+  if (!clientId || !clientSecret) {
     return 'Set SPOTIFY_CLIENT_ID and SPOTIFY_CLIENT_SECRET in .env.local first. Get them from https://developer.spotify.com/dashboard'
   }
 
   const verifier = randomBytes(32).toString('base64url')
   const challenge = createHash('sha256').update(verifier).digest('base64url')
   const state = randomBytes(8).toString('hex')
-
-  setSettings({ spotifyAccessToken: `pkce:${verifier}:${state}` })
 
   const params = new URLSearchParams({
     client_id: clientId,
@@ -170,18 +176,81 @@ async function authHandler(): Promise<string> {
 
   const authUrl = `https://accounts.spotify.com/authorize?${params.toString()}`
 
-  try {
-    const { shell } = require('electron')
-    await shell.openExternal(authUrl)
-    return 'Spotify authentication browser window opened. After you log in and authorize, say "Spotify connected" and I\'ll verify the connection.'
-  } catch {
-    return `Open this URL to connect Spotify:\n${authUrl}`
+  // Spin up a one-shot callback server before opening the browser
+  const code = await new Promise<string>((resolve, reject) => {
+    const srv = createServer((req, res) => {
+      try {
+        const url = new URL(req.url ?? '/', 'http://localhost:8919')
+        if (!url.pathname.includes('spotify-callback')) { res.end('Not found'); return }
+
+        const returnedState = url.searchParams.get('state')
+        const authCode = url.searchParams.get('code')
+        const error = url.searchParams.get('error')
+
+        if (error) {
+          res.end(`<html><body style="font-family:monospace;padding:24px">Spotify auth error: ${error}<br>You can close this tab.</body></html>`)
+          srv.close()
+          reject(new Error(`Spotify auth denied: ${error}`))
+          return
+        }
+
+        if (returnedState !== state || !authCode) {
+          res.end('<html><body style="font-family:monospace;padding:24px">Invalid callback. Try connecting again.</body></html>')
+          return
+        }
+
+        res.end('<html><body style="font-family:monospace;padding:24px;background:#0a1628;color:#1db954">&#10003; Spotify connected! You can close this tab.</body></html>')
+        srv.close()
+        resolve(authCode)
+      } catch (e) {
+        reject(e)
+      }
+    })
+
+    srv.listen(8919, '127.0.0.1', () => {
+      require('child_process').exec(`start "" "${authUrl}"`)
+    })
+
+    srv.on('error', (err) => reject(err))
+
+    // Timeout after 5 minutes
+    setTimeout(() => { srv.close(); reject(new Error('Spotify auth timed out')) }, 5 * 60 * 1000)
+  })
+
+  // Exchange code for tokens
+  const tokenRes = await fetch(SPOTIFY_TOKEN_URL, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+    body: new URLSearchParams({
+      grant_type: 'authorization_code',
+      code,
+      redirect_uri: REDIRECT_URI,
+      client_id: clientId,
+      code_verifier: verifier,
+    }).toString(),
+  })
+
+  if (!tokenRes.ok) {
+    const body = await tokenRes.text().catch(() => '')
+    throw new Error(`Spotify token exchange failed: ${tokenRes.status} ${body}`)
   }
+
+  const data = await tokenRes.json() as { access_token: string; refresh_token: string; expires_in: number }
+  setSettings({
+    spotifyAccessToken: data.access_token,
+    spotifyRefreshToken: data.refresh_token,
+    spotifyExpiresAt: Date.now() + data.expires_in * 1000,
+  })
+
+  return 'Spotify connected! You can now control playback with commands like "play some jazz", "pause", "next track", etc.'
 }
 
 async function currentTrack(): Promise<string> {
   const res = await spotifyFetch('/me/player/currently-playing')
-  if (res.status === 204) return 'Nothing is playing right now.'
+  if (res.status === 204) {
+    emitEvent({ type: 'spotify_now_playing', isPlaying: false })
+    return 'Nothing is playing right now.'
+  }
   if (!res.ok) return `Spotify error: ${res.status}`
 
   const data = await res.json() as {
@@ -191,7 +260,10 @@ async function currentTrack(): Promise<string> {
     is_playing?: boolean
   }
 
-  if (!data.item) return 'Nothing is playing right now.'
+  if (!data.item) {
+    emitEvent({ type: 'spotify_now_playing', isPlaying: false })
+    return 'Nothing is playing right now.'
+  }
 
   const track = data.item
   const artist = track.artists.map(a => a.name).join(', ')
@@ -199,6 +271,8 @@ async function currentTrack(): Promise<string> {
   const duration = data.duration_ms ?? 1
   const pct = Math.round((progress / duration) * 100)
   const status = data.is_playing ? 'Playing' : 'Paused'
+
+  emitEvent({ type: 'spotify_now_playing', track: track.name, artist, isPlaying: data.is_playing ?? false })
 
   return `${status}: "${track.name}" by ${artist} — ${track.album.name} (${pct}% through)`
 }
@@ -217,39 +291,93 @@ async function searchSpotify(query: string, type: string, limit: number): Promis
   }))
 }
 
+async function getActiveDeviceId(): Promise<string | null> {
+  const res = await spotifyFetch('/me/player/devices')
+  if (!res.ok) return null
+  const data = await res.json() as { devices: Array<{ id: string; is_active: boolean; name: string }> }
+  const active = data.devices.find(d => d.is_active)
+  if (active) return active.id
+  if (data.devices.length > 0) {
+    // Transfer playback to first available device
+    const id = data.devices[0].id
+    await spotifyFetch('/me/player', { method: 'PUT', body: JSON.stringify({ device_ids: [id] }) })
+    await new Promise(r => setTimeout(r, 800))
+    return id
+  }
+  return null
+}
+
+async function ensureDevice(): Promise<boolean> {
+  const id = await getActiveDeviceId()
+  if (id) return true
+  // No devices at all — launch Spotify and wait
+  require('child_process').exec('start "" "spotify:"')
+  await new Promise(r => setTimeout(r, 4000))
+  const retry = await getActiveDeviceId()
+  return retry !== null
+}
+
+async function myPlaylists(limit = 50): Promise<Array<{ name: string; uri: string; id: string }>> {
+  const res = await spotifyFetch(`/me/playlists?limit=${limit}`)
+  if (!res.ok) throw new Error(`Failed to fetch playlists: ${res.status}`)
+  const data = await res.json() as { items: Array<{ id: string; name: string; uri: string }> }
+  return data.items.map(p => ({ id: p.id, name: p.name, uri: p.uri }))
+}
+
 async function playHandler(input: Record<string, unknown>): Promise<string> {
   let contextUri: string | undefined
   let uris: string[] | undefined
+  let label = ''
 
   if (input.uri) {
     const uri = String(input.uri)
     if (uri.startsWith('spotify:track:')) uris = [uri]
     else contextUri = uri
+    label = uri
   } else if (input.query) {
+    const query = String(input.query)
     const type = String(input.type ?? 'track')
-    const results = await searchSpotify(String(input.query), type, 1)
-    if (results.length === 0) return `No ${type} found for "${input.query}".`
-    const found = results[0]
-    if (found.uri.startsWith('spotify:track:')) uris = [found.uri]
-    else contextUri = found.uri
+    label = query
+
+    // For playlists, search user's own library first
+    if (type === 'playlist') {
+      const playlists = await myPlaylists()
+      const match = playlists.find(p => p.name.toLowerCase().includes(query.toLowerCase()))
+      if (match) {
+        contextUri = match.uri
+        label = match.name
+      }
+    }
+
+    // Fall back to public Spotify search
+    if (!contextUri && !uris) {
+      const results = await searchSpotify(query, type, 1)
+      if (results.length === 0) return `No ${type} found for "${query}".`
+      const found = results[0]
+      if (found.uri.startsWith('spotify:track:')) uris = [found.uri]
+      else contextUri = found.uri
+    }
   }
+
+  await ensureDevice()
 
   const body: Record<string, unknown> = {}
   if (contextUri) body.context_uri = contextUri
   if (uris) body.uris = uris
+  const bodyStr = JSON.stringify(body)
 
-  const res = await spotifyFetch('/me/player/play', {
-    method: 'PUT',
-    body: JSON.stringify(body),
-  })
+  const res = await spotifyFetch('/me/player/play', { method: 'PUT', body: bodyStr })
 
-  if (res.status === 204) {
-    if (input.query) return `Now playing: "${input.query}".`
-    return 'Playback resumed.'
-  }
+  if (res.status === 204) return label ? `Now playing: "${label}".` : 'Playback resumed.'
   if (res.status === 403) return 'Playback requires Spotify Premium.'
-  if (res.status === 404) return 'No active Spotify device found. Open Spotify on your device first.'
+  if (res.status === 404) return 'No Spotify device available — open Spotify on any device and try again.'
   return `Spotify play error: ${res.status}`
+}
+
+async function myPlaylistsHandler(): Promise<string> {
+  const playlists = await myPlaylists()
+  if (playlists.length === 0) return 'No playlists found in your Spotify library.'
+  return playlists.map((p, i) => `[${i + 1}] ${p.name}\n  URI: ${p.uri}`).join('\n\n')
 }
 
 async function simpleAction(endpoint: string, method: 'PUT' | 'POST', successMsg: string): Promise<string> {
@@ -293,15 +421,16 @@ async function queueHandler(input: Record<string, unknown>): Promise<string> {
 export async function handleSpotifyTool(name: string, input: Record<string, unknown>): Promise<string> {
   try {
     switch (name) {
-      case 'spotify_auth':    return await authHandler()
-      case 'spotify_current': return await currentTrack()
-      case 'spotify_play':    return await playHandler(input)
-      case 'spotify_pause':   return await simpleAction('/me/player/pause', 'PUT', 'Playback paused.')
-      case 'spotify_next':    return await simpleAction('/me/player/next', 'POST', 'Skipped to next track.')
-      case 'spotify_prev':    return await simpleAction('/me/player/previous', 'POST', 'Went to previous track.')
-      case 'spotify_volume':  return await volumeHandler(Number(input.volume))
-      case 'spotify_search':  return await searchHandler(String(input.query ?? ''), String(input.type ?? 'track'), Number(input.limit ?? 5))
-      case 'spotify_queue':   return await queueHandler(input)
+      case 'spotify_auth':         return await authHandler()
+      case 'spotify_current':      return await currentTrack()
+      case 'spotify_play':         return await playHandler(input)
+      case 'spotify_pause':        return await simpleAction('/me/player/pause', 'PUT', 'Playback paused.')
+      case 'spotify_next':         return await simpleAction('/me/player/next', 'POST', 'Skipped to next track.')
+      case 'spotify_prev':         return await simpleAction('/me/player/previous', 'POST', 'Went to previous track.')
+      case 'spotify_volume':       return await volumeHandler(Number(input.volume))
+      case 'spotify_search':       return await searchHandler(String(input.query ?? ''), String(input.type ?? 'track'), Number(input.limit ?? 5))
+      case 'spotify_my_playlists': return await myPlaylistsHandler()
+      case 'spotify_queue':        return await queueHandler(input)
       default: throw new Error(`Unknown spotify tool: ${name}`)
     }
   } catch (err: unknown) {
