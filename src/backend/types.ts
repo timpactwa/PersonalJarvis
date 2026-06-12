@@ -1,9 +1,12 @@
 // Events sent from backend → renderer
 export type AnimState = 'idle' | 'listening' | 'thinking' | 'speaking'
 
+export type LlmProvider = 'auto' | 'claude' | 'groq' | 'ollama'
+
 export interface Settings {
   hotkey: string
   voiceId: string
+  llmProvider: LlmProvider
   modelPreference: 'auto' | 'fable' | 'haiku'
   shortTurns: number
   ollamaModel: string

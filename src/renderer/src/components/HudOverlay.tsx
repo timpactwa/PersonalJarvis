@@ -1,4 +1,13 @@
-import type { AnimState } from '../../../backend/types'
+import type { AnimState, LlmProvider } from '../../../backend/types'
+
+const PROVIDER_CYCLE: LlmProvider[] = ['auto', 'groq', 'ollama', 'claude']
+
+const PROVIDER_LABELS: Record<LlmProvider, string> = {
+  auto: 'AUTO',
+  claude: 'CLAUDE',
+  groq: 'GROQ',
+  ollama: 'OLLAMA',
+}
 
 const STATUS_LABELS: Record<AnimState, string> = {
   idle:      'ONLINE',
@@ -19,13 +28,22 @@ interface Props {
   tokensToday: number
   costToday: number
   model: string
+  llmProvider?: LlmProvider
+  onProviderChange?: (provider: LlmProvider) => void
   onStatsClick?: () => void
   textVisible?: boolean
   onToggleText?: () => void
 }
 
-export function HudOverlay({ animState, tokensToday, costToday, model, onStatsClick, textVisible = true, onToggleText }: Props): JSX.Element {
-  const cleanModel = model.replace(/^groq:/, '').replace(/^ollama:/, '').toUpperCase()
+export function HudOverlay({ animState, tokensToday, costToday, model, llmProvider = 'auto', onProviderChange, onStatsClick, textVisible = true, onToggleText }: Props): JSX.Element {
+  const cycleProvider = (): void => {
+    if (!onProviderChange) return
+    const idx = PROVIDER_CYCLE.indexOf(llmProvider)
+    const next = PROVIDER_CYCLE[(idx + 1) % PROVIDER_CYCLE.length]
+    onProviderChange(next)
+  }
+
+  const providerLabel = PROVIDER_LABELS[llmProvider] ?? model.replace(/^groq:/, '').replace(/^ollama:/, '').toUpperCase()
 
   return (
     <>
@@ -140,15 +158,24 @@ export function HudOverlay({ animState, tokensToday, costToday, model, onStatsCl
           <span style={{ color: 'var(--text-dim)', margin: '0 4px' }}>·</span>
           <span style={{ color: 'var(--text-mid)' }}>${costToday.toFixed(4)}</span>
         </div>
-        <div style={{
-          fontFamily: 'var(--font-data)',
-          fontSize: 10,
-          fontWeight: 500,
-          letterSpacing: '0.12em',
-          color: 'var(--text-dim)',
-        }}>
-          {cleanModel}
-        </div>
+        <button
+          onClick={cycleProvider}
+          title="Click to switch LLM provider (Auto → Groq → Ollama → Claude)"
+          style={{
+            background: 'none',
+            border: 'none',
+            padding: 0,
+            cursor: onProviderChange ? 'pointer' : 'default',
+            fontFamily: 'var(--font-data)',
+            fontSize: 10,
+            fontWeight: 600,
+            letterSpacing: '0.12em',
+            color: llmProvider === 'claude' ? 'var(--text-dim)' : 'var(--accent)',
+            textDecoration: onProviderChange ? 'underline dotted' : 'none',
+          }}
+        >
+          {providerLabel}
+        </button>
       </div>
     </>
   )

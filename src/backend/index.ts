@@ -1,6 +1,26 @@
 import { config } from 'dotenv'
 config({ path: `${process.cwd()}/.env.local` })
 
+// Global guard rails — registered before anything else runs so even startup
+// crashes produce a readable error instead of a silent exit. An uncaught
+// exception leaves the process in an unknown state, so we tell the renderer,
+// flush, and exit non-zero — the main process restarts us. Unhandled
+// rejections are logged and surfaced but are not fatal.
+process.on('uncaughtException', (err) => {
+  console.error('[backend] FATAL uncaught exception:', err.stack ?? err.message)
+  try {
+    broadcast({ type: 'error', message: `Backend crashed: ${err.message} — restarting...` })
+  } catch { /* ws may not be up yet */ }
+  setTimeout(() => process.exit(1), 250)
+})
+process.on('unhandledRejection', (reason) => {
+  const msg = reason instanceof Error ? (reason.stack ?? reason.message) : String(reason)
+  console.error('[backend] unhandled promise rejection:', msg)
+  try {
+    broadcast({ type: 'error', message: `Backend error: ${reason instanceof Error ? reason.message : String(reason)}` })
+  } catch { /* ws may not be up yet */ }
+})
+
 import { WebSocketServer, WebSocket } from 'ws'
 import { createServer } from 'http'
 import type { BackendEvent, RendererEvent } from './types'
@@ -38,26 +58,76 @@ function needsTool(text: string): boolean {
   return TOOL_KEYWORDS_ROUTE.some(kw => lower.includes(kw))
 }
 
+function getLlmProvider(): import('./types').LlmProvider {
+  try {
+    const p = getSettings().llmProvider
+    if (p === 'auto' || p === 'claude' || p === 'groq' || p === 'ollama') return p
+  } catch { /* db not ready */ }
+  return 'auto'
+}
+
+function getActiveProviderLabel(): string {
+  const pref = getLlmProvider()
+  if (pref !== 'auto') return pref
+  if (isChatAvailable()) return 'claude'
+  if (process.env.GROQ_API_KEY) return 'groq'
+  return 'ollama'
+}
+
+function claudeWithGroqFallback(
+  userText: string,
+  history: Message[],
+  memories: string[],
+  broadcast: (e: BackendEvent) => void,
+) {
+  return chatClaude(userText, history, memories, broadcast).catch((err: unknown) => {
+    const msg = err instanceof Error ? err.message : String(err)
+    const rateLimited = msg.includes('429') || msg.includes('rate_limit') || msg.includes('usage')
+    if (rateLimited && process.env.GROQ_API_KEY) {
+      console.error('[pipeline] Claude unavailable — falling back to Groq')
+      return chatGroq(userText, history, memories, broadcast)
+    }
+    throw err
+  })
+}
+
 function chat(
   userText: string,
   history: Message[],
   memories: string[],
   broadcast: (e: BackendEvent) => void,
 ) {
+  const provider = getLlmProvider()
+
+  if (provider === 'groq') {
+    if (!process.env.GROQ_API_KEY) {
+      throw new Error('LLM provider set to Groq but GROQ_API_KEY is not configured in .env.local')
+    }
+    console.error('[pipeline] forced Groq')
+    return chatGroq(userText, history, memories, broadcast)
+  }
+
+  if (provider === 'ollama') {
+    console.error('[pipeline] forced Ollama')
+    return chatOllama(userText, history, memories, broadcast)
+  }
+
+  if (provider === 'claude') {
+    if (!isChatAvailable()) {
+      throw new Error('LLM provider set to Claude but no credentials are configured in .env.local')
+    }
+    console.error('[pipeline] forced Claude')
+    return claudeWithGroqFallback(userText, history, memories, broadcast)
+  }
+
+  // auto — smart routing (original behaviour)
   if (process.env.GROQ_API_KEY && needsTool(userText)) {
     console.error('[pipeline] tool request — using Groq')
     return chatGroq(userText, history, memories, broadcast)
   }
   if (isChatAvailable()) {
     console.error('[pipeline] conversational — using Claude')
-    return chatClaude(userText, history, memories, broadcast).catch((err: unknown) => {
-      const msg = err instanceof Error ? err.message : String(err)
-      if ((msg.includes('429') || msg.includes('rate_limit')) && process.env.GROQ_API_KEY) {
-        console.error('[pipeline] Claude rate limited — falling back to Groq')
-        return chatGroq(userText, history, memories, broadcast)
-      }
-      throw err
-    })
+    return claudeWithGroqFallback(userText, history, memories, broadcast)
   }
   if (process.env.GROQ_API_KEY) {
     console.error('[pipeline] using Groq LLM')
@@ -67,7 +137,7 @@ function chat(
   return chatOllama(userText, history, memories, broadcast)
 }
 import { synthesize } from './elevenlabs'
-import { initDb, getUsageDaily, getUsageByModel, getAllMemories, insertMemory } from './memory/db'
+import { initDb, closeDb, isDbAvailable, getDbError, getUsageDaily, getUsageByModel, getAllMemories, insertMemory } from './memory/db'
 import { logApiCall, getStatsToday } from './memory/logger'
 import { embed, findTopK } from './memory/embeddings'
 import { resolveConfirmation, hasPending, getLatestPending } from './confirm'
@@ -80,6 +150,7 @@ import {
   startCapture,
   stopCapture,
   cancelCapture,
+  shutdownCapture,
   isCaptureAvailable,
   getCaptureError,
   getSelectedDevice,
@@ -111,7 +182,19 @@ setEmitter(broadcast)
 async function sendDiagnostics(): Promise<void> {
   const issues: string[] = []
 
-  if (isChatAvailable()) {
+  const provider = getLlmProvider()
+  console.error(`[diag] LLM provider setting: ${provider} (active: ${getActiveProviderLabel()})`)
+
+  if (provider === 'groq' || (provider === 'auto' && !isChatAvailable() && process.env.GROQ_API_KEY)) {
+    if (process.env.GROQ_API_KEY) {
+      const model = process.env.GROQ_MODEL ?? 'llama-3.3-70b-versatile'
+      console.error(`[diag] LLM: Groq (${model})`)
+    } else {
+      issues.push('LLM provider is Groq but GROQ_API_KEY is not set in .env.local')
+    }
+  } else if (provider === 'ollama') {
+    console.error('[diag] LLM: Ollama (forced)')
+  } else if (isChatAvailable()) {
     console.error('[diag] LLM: Claude (Fable 5 / Haiku 4.5 — model routing active)')
   } else if (process.env.GROQ_API_KEY) {
     const model = process.env.GROQ_MODEL ?? 'llama-3.3-70b-versatile'
@@ -155,6 +238,11 @@ async function sendDiagnostics(): Promise<void> {
     }
   }
 
+  if (!isDbAvailable()) {
+    console.error('[diag] persistence: DISABLED —', getDbError())
+    issues.push('Memory persistence is off (SQLite failed to load — run `npm run rebuild:native`). Conversations work, but nothing is saved.')
+  }
+
   if (issues.length > 0) {
     broadcast({ type: 'error', message: issues.join('\n') })
   }
@@ -167,12 +255,21 @@ wss.on('connection', (ws: WebSocket) => {
   ws.on('message', (raw, isBinary) => {
     if (isBinary) {
       void processAudio(raw as Buffer, 'renderer-ws')
-    } else {
-      try {
-        handleRendererEvent(JSON.parse(raw.toString()) as RendererEvent)
-      } catch {
-        console.error('[backend] invalid message', raw)
-      }
+      return
+    }
+    let event: RendererEvent
+    try {
+      event = JSON.parse(raw.toString()) as RendererEvent
+    } catch {
+      console.error('[backend] malformed JSON from renderer:', raw.toString().slice(0, 200))
+      return
+    }
+    try {
+      handleRendererEvent(event)
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err)
+      console.error(`[backend] error handling '${event.type}' event:`, err)
+      broadcast({ type: 'error', message: `Failed to handle ${event.type}: ${msg}` })
     }
   })
 
@@ -186,10 +283,10 @@ wss.on('connection', (ws: WebSocket) => {
 
   try {
     const stats = getStatsToday()
-    const activeModel = isChatAvailable() ? 'claude' : process.env.GROQ_API_KEY ? 'groq' : 'ollama'
-    broadcast({ type: 'stats', tokensToday: stats.tokens, costToday: stats.cost, model: activeModel })
+    broadcast({ type: 'stats', tokensToday: stats.tokens, costToday: stats.cost, model: getActiveProviderLabel() })
   } catch { /* db may not have data yet */ }
 
+  broadcast({ type: 'settings', settings: getSettings() })
   void sendDiagnostics()
   // Pre-warm embedding model in background — avoids 3-5s freeze on first query
   void embed('warmup').catch(() => {})
@@ -288,6 +385,13 @@ function handleRendererEvent(event: RendererEvent): void {
   if (event.type === 'set_settings') {
     const updated = setSettings(event.settings)
     broadcast({ type: 'settings', settings: updated })
+    try {
+      const stats = getStatsToday()
+      broadcast({ type: 'stats', tokensToday: stats.tokens, costToday: stats.cost, model: getActiveProviderLabel() })
+    } catch { /* ignore */ }
+    if (updated.llmProvider) {
+      console.error('[backend] LLM provider changed to:', updated.llmProvider)
+    }
     return
   }
   eventHandlers.forEach(h => h(event))
@@ -422,8 +526,7 @@ async function runConversation(userText: string): Promise<void> {
   const lower = userText.toLowerCase()
   if (lower.includes('show dashboard') || lower.includes('open dashboard')) {
     const stats = getStatsToday()
-    const activeModel = isChatAvailable() ? 'claude' : process.env.GROQ_API_KEY ? 'groq' : 'ollama'
-    broadcast({ type: 'stats', tokensToday: stats.tokens, costToday: stats.cost, model: activeModel })
+    broadcast({ type: 'stats', tokensToday: stats.tokens, costToday: stats.cost, model: getActiveProviderLabel() })
     broadcast({ type: 'dashboard_open' })
     broadcast({ type: 'state', state: 'idle' })
     return
@@ -531,12 +634,23 @@ async function handlePttStop(): Promise<void> {
   await processAudio(pcm, 'backend-ptt')
 }
 
+// Graceful shutdown: stop the ffmpeg capture stream (it outlives a hard kill),
+// close the db cleanly, and exit. Triggered by the main process on app quit.
+function shutdown(): void {
+  console.error('[backend] shutdown requested — cleaning up')
+  shutdownCapture()
+  try { closeDb() } catch { /* best effort */ }
+  server.close()
+  process.exit(0)
+}
+
 if (process.parentPort) {
   process.parentPort.on('message', (e: { data: { type?: string } }) => {
     const msg = e.data
     if (msg?.type === 'ptt-start') handlePttStart()
-    else if (msg?.type === 'ptt-stop') handlePttStop()
+    else if (msg?.type === 'ptt-stop') void handlePttStop()
     else if (msg?.type === 'ptt-cancel') cancelCapture()
+    else if (msg?.type === 'shutdown') shutdown()
   })
   console.error('[backend] parentPort PTT listener ready')
 } else {
@@ -555,4 +669,8 @@ server.listen(PORT, '127.0.0.1', () => {
   }
 
   process.stdout.write(JSON.stringify({ type: 'ready', port: addr.port }) + '\n')
+  // Also signal via parentPort — stdio pipes are unreliable in Electron utilityProcess on Windows
+  if (process.parentPort) {
+    process.parentPort.postMessage({ type: 'ready', port: addr.port })
+  }
 })

@@ -49,7 +49,19 @@ export function SettingsPanel({ open, settings, onClose, onSave, onHotkeyChange 
         <label style={label}>ELEVENLABS VOICE ID</label>
         <input style={field} value={draft.voiceId} onChange={e => setDraft({ ...draft, voiceId: e.target.value })} />
 
-        <label style={label}>MODEL PREFERENCE</label>
+        <label style={label}>LLM PROVIDER</label>
+        <select
+          style={field}
+          value={draft.llmProvider ?? 'auto'}
+          onChange={e => setDraft({ ...draft, llmProvider: e.target.value as Settings['llmProvider'] })}
+        >
+          <option value="auto">Auto (smart routing)</option>
+          <option value="claude">Claude only</option>
+          <option value="groq">Groq only</option>
+          <option value="ollama">Ollama only (local)</option>
+        </select>
+
+        <label style={label}>CLAUDE MODEL (when using Claude)</label>
         <select
           style={field}
           value={draft.modelPreference}

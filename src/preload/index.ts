@@ -3,13 +3,23 @@ import { contextBridge, ipcRenderer } from 'electron'
 let pttCallback: (() => void) | null = null
 let pttStopCallback: (() => void) | null = null
 
-// Register at module load time (before any renderer code) so we never miss the IPC
+// Register at module load time (before any renderer code) so we never miss the
+// IPC. Callbacks stay subscribed: the backend can restart on a NEW port, and
+// that update must reach the renderer too (a one-shot callback here once left
+// the renderer reconnecting to a dead port forever).
 let cachedPort: number | null = null
-let pendingPortCb: ((port: number) => void) | null = null
+const portCbs: Array<(port: number) => void> = []
 ipcRenderer.on('backend-port', (_e, port: number) => {
   cachedPort = port
-  pendingPortCb?.(port)
-  pendingPortCb = null
+  portCbs.forEach(cb => cb(port))
+})
+
+type BackendStatus = { status: string; message?: string }
+let cachedStatus: BackendStatus | null = null
+const statusCbs: Array<(s: BackendStatus) => void> = []
+ipcRenderer.on('backend-status', (_e, s: BackendStatus) => {
+  cachedStatus = s
+  statusCbs.forEach(cb => cb(s))
 })
 
 ipcRenderer.on('ptt-start', () => { pttCallback?.() })
@@ -17,11 +27,12 @@ ipcRenderer.on('ptt-stop', () => { pttStopCallback?.() })
 
 contextBridge.exposeInMainWorld('jarvis', {
   onBackendPort: (cb: (port: number) => void) => {
-    if (cachedPort !== null) {
-      cb(cachedPort)
-    } else {
-      pendingPortCb = cb
-    }
+    portCbs.push(cb)
+    if (cachedPort !== null) cb(cachedPort)
+  },
+  onBackendStatus: (cb: (s: BackendStatus) => void) => {
+    statusCbs.push(cb)
+    if (cachedStatus !== null) cb(cachedStatus)
   },
   onPttStart: (cb: () => void) => { pttCallback = cb },
   onPttStop: (cb: () => void) => { pttStopCallback = cb },

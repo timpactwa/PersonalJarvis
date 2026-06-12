@@ -3,6 +3,10 @@ import { join } from 'path'
 
 let mainWindow: BrowserWindow | null = null
 let backendProcess: Electron.UtilityProcess | null = null
+let savedBackendPort: number | null = null
+let lastBackendStatus: { status: string; message?: string } | null = null
+let backendRestarts = 0
+let quitting = false
 let uiohookLoaded = false
 let mKeyDown = false
 let lastMKeydownAt = 0
@@ -71,6 +75,125 @@ try {
   console.log('[main] uiohook-napi not available — falling back to Alt+Space toggle:', err)
 }
 
+const BACKEND_READY_TIMEOUT_MS = 20_000
+const BACKEND_MAX_RESTARTS = 3
+let readyWatchdog: NodeJS.Timeout | null = null
+
+function sendBackendStatus(status: 'starting' | 'ready' | 'crashed' | 'failed', message?: string): void {
+  lastBackendStatus = { status, message }
+  sendToRenderer('backend-status', lastBackendStatus)
+}
+
+// Single funnel for the ready signal — it arrives via both parentPort IPC and
+// the stdout pipe (belt and suspenders; stdio pipes have been flaky in
+// utilityProcess on Windows), so dedupe here.
+function onBackendReady(port: number, via: string): void {
+  if (savedBackendPort === port) return
+  console.log(`[main] backend ready on port ${port} (via ${via})`)
+  if (readyWatchdog) {
+    clearTimeout(readyWatchdog)
+    readyWatchdog = null
+  }
+  backendRestarts = 0
+  savedBackendPort = port
+  process.env.JARVIS_BACKEND_PORT = String(port)
+  sendToRenderer('backend-port', port)
+  sendBackendStatus('ready')
+}
+
+function startBackend(): void {
+  if (backendProcess || quitting) return
+  savedBackendPort = null
+  const entry = join(__dirname, '../backend/index.js')
+  console.log('[main] starting backend:', entry)
+  sendBackendStatus('starting')
+
+  const proc = utilityProcess.fork(entry, [], {
+    env: { ...process.env, JARVIS_PORT: '0' },
+    stdio: 'pipe',
+    serviceName: 'jarvis-backend',
+  })
+  backendProcess = proc
+
+  // If nothing reports ready, say so loudly instead of leaving the renderer
+  // on an eternal "connecting..." spinner with zero clues.
+  readyWatchdog = setTimeout(() => {
+    readyWatchdog = null
+    console.error(`[main] backend did not report ready within ${BACKEND_READY_TIMEOUT_MS / 1000}s.`)
+    console.error('[main] Look for [backend] lines above — if there are none at all, the process failed to spawn (bad path or missing dist-electron/backend/index.js; run: npm run build:backend).')
+    sendBackendStatus('failed', 'Backend did not start in time. Check the terminal for [backend] errors.')
+  }, BACKEND_READY_TIMEOUT_MS)
+
+  proc.on('spawn', () => {
+    console.log('[main] backend process spawned (pid', proc.pid, ')')
+  })
+
+  proc.stderr?.on('data', (data: Buffer) => {
+    process.stderr.write('[backend] ' + data.toString())
+  })
+
+  // Primary ready signal: parentPort IPC
+  proc.on('message', (msg: { type?: string; port?: number }) => {
+    if (msg.type === 'ready' && msg.port) onBackendReady(msg.port, 'ipc')
+  })
+
+  // Fallback ready signal: JSON line on stdout
+  let stdoutBuf = ''
+  proc.stdout?.on('data', (data: Buffer) => {
+    stdoutBuf += data.toString()
+    const lines = stdoutBuf.split('\n')
+    stdoutBuf = lines.pop()!
+    for (const line of lines) {
+      if (!line.trim()) continue
+      try {
+        const msg = JSON.parse(line)
+        if (msg.type === 'ready' && msg.port) onBackendReady(msg.port, 'stdout')
+      } catch { console.log('[backend]', line) }
+    }
+  })
+
+  proc.on('exit', (code: number) => {
+    if (backendProcess !== proc) return // stale handler from a replaced process
+    backendProcess = null
+    savedBackendPort = null
+    if (readyWatchdog) {
+      clearTimeout(readyWatchdog)
+      readyWatchdog = null
+    }
+    if (quitting) return
+    console.error(`[main] backend exited unexpectedly with code ${code}`)
+    if (backendRestarts < BACKEND_MAX_RESTARTS) {
+      backendRestarts++
+      const delay = 500 * 2 ** (backendRestarts - 1) // 500ms, 1s, 2s
+      console.error(`[main] restarting backend in ${delay}ms (attempt ${backendRestarts}/${BACKEND_MAX_RESTARTS})`)
+      sendBackendStatus('crashed', `Backend crashed (exit code ${code}) — restarting...`)
+      setTimeout(startBackend, delay)
+    } else {
+      console.error('[main] backend keeps crashing — giving up. Fix the [backend] error above, then restart the app.')
+      sendBackendStatus('failed', `Backend crashed ${BACKEND_MAX_RESTARTS + 1} times (exit code ${code}). Check the terminal, then restart the app.`)
+    }
+  })
+}
+
+// Ask the backend to clean up (ffmpeg stream, sqlite) and exit; hard-kill if
+// it doesn't comply quickly.
+function stopBackend(): void {
+  quitting = true
+  const proc = backendProcess
+  backendProcess = null
+  if (!proc) return
+  try {
+    proc.postMessage({ type: 'shutdown' })
+  } catch {
+    try { proc.kill() } catch { /* already gone */ }
+    return
+  }
+  const hardKill = setTimeout(() => {
+    try { proc.kill() } catch { /* already gone */ }
+  }, 1500)
+  proc.once('exit', () => clearTimeout(hardKill))
+}
+
 function createWindow(): void {
   mainWindow = new BrowserWindow({
     width: 1280,
@@ -102,34 +225,23 @@ function createWindow(): void {
   })
   mainWindow.on('blur', () => stopPtt('window blur'))
 
-  // Spawn backend as child process
-  backendProcess = utilityProcess.fork(
-    join(__dirname, '../backend/index.js'),
-    [],
-    { env: { ...process.env, JARVIS_PORT: '0' }, stdio: 'pipe' }
-  )
-
-  backendProcess.stderr?.on('data', (data: Buffer) => {
-    process.stderr.write('[backend] ' + data.toString())
-  })
-
-  let stdoutBuf = ''
-  backendProcess.stdout?.on('data', (data: Buffer) => {
-    stdoutBuf += data.toString()
-    const lines = stdoutBuf.split('\n')
-    stdoutBuf = lines.pop()!
-    for (const line of lines) {
-      if (!line.trim()) continue
-      try {
-        const msg = JSON.parse(line)
-        if (msg.type === 'ready') {
-          console.log('[main] backend ready on port', msg.port)
-          process.env.JARVIS_BACKEND_PORT = String(msg.port)
-          sendToRenderer('backend-port', msg.port)
-        }
-      } catch { console.log('[backend]', line) }
+  // Re-send the backend port + status after the renderer finishes loading.
+  // The preload registers ipcRenderer.on('backend-port') only once the page
+  // loads — if the backend sends ready before loadURL is called (which it
+  // often does, because cache-clearing delays loadURL by ~200–500ms), the
+  // initial sendToRenderer call is silently dropped. did-finish-load fires
+  // after the preload has run and the IPC channel is open, so sending here
+  // guarantees delivery regardless of startup timing.
+  mainWindow.webContents.on('did-finish-load', () => {
+    if (savedBackendPort !== null) {
+      sendToRenderer('backend-port', savedBackendPort)
+    }
+    if (lastBackendStatus !== null) {
+      sendToRenderer('backend-status', lastBackendStatus)
     }
   })
+
+  startBackend()
 
   // Always load fresh in dev. Clear HTTP cache + storage (service workers,
   // cachestorage, etc.) so the renderer can never serve a stale bundle — that
@@ -211,9 +323,10 @@ app.whenReady().then(() => {
 app.on('will-quit', () => {
   globalShortcut.unregisterAll()
   if (uiohookLoaded) uIOhook.stop()
+  stopBackend()
 })
 
 app.on('window-all-closed', () => {
-  backendProcess?.kill()
+  stopBackend()
   if (process.platform !== 'darwin') app.quit()
 })

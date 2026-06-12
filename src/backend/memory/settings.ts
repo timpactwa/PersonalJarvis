@@ -1,9 +1,10 @@
 import { getDb, isDbAvailable } from './db'
-import type { Settings } from '../types'
+import type { LlmProvider, Settings } from '../types'
 
 const DEFAULTS: Settings = {
   hotkey: 'Alt+Space',
   voiceId: process.env.ELEVENLABS_VOICE_ID ?? 'pqHfZKP75CvOlQylNhV4',
+  llmProvider: 'auto',
   modelPreference: 'auto',
   shortTurns: 20,
   ollamaModel: process.env.OLLAMA_MODEL ?? 'llama3.1:8b',
@@ -16,6 +17,12 @@ export function getSettings(): Settings {
   const rows = getDb().prepare('SELECT key, value FROM settings').all() as Array<{ key: string; value: string }>
   const map = new Map(rows.map(r => [r.key, r.value]))
 
+  const rawProvider = map.get('llmProvider')
+  const llmProvider: LlmProvider =
+    rawProvider === 'auto' || rawProvider === 'claude' || rawProvider === 'groq' || rawProvider === 'ollama'
+      ? rawProvider
+      : DEFAULTS.llmProvider
+
   const rawPref = map.get('modelPreference')
   const modelPreference: Settings['modelPreference'] =
     rawPref === 'fable' || rawPref === 'haiku' || rawPref === 'auto' ? rawPref : DEFAULTS.modelPreference
@@ -26,6 +33,7 @@ export function getSettings(): Settings {
   return {
     hotkey: map.get('hotkey') ?? DEFAULTS.hotkey,
     voiceId: map.get('voiceId') ?? DEFAULTS.voiceId,
+    llmProvider,
     modelPreference,
     shortTurns,
     ollamaModel: map.get('ollamaModel') ?? DEFAULTS.ollamaModel,

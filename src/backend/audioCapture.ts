@@ -90,6 +90,7 @@ let captureError: string | null = null
 let cachedDevice: string | null = null
 let restartTimer: NodeJS.Timeout | null = null
 let initializing = false
+let shuttingDown = false
 const recorder = new PcmRecorder()
 
 function loadFfmpeg(): string | null {
@@ -168,7 +169,7 @@ async function pickDevice(ffmpeg: string): Promise<string | null> {
 }
 
 function scheduleRestart(): void {
-  if (restartTimer) return
+  if (shuttingDown || restartTimer) return
   restartTimer = setTimeout(() => {
     restartTimer = null
     void initCapture()
@@ -274,8 +275,19 @@ export function cancelCapture(): void {
   recorder.cancel()
 }
 
-// Best-effort cleanup; if the backend is hard-killed, ffmpeg exits on its own
-// when its stdout pipe breaks.
-process.on('exit', () => {
-  try { ffmpegProc?.kill() } catch { /* ignore */ }
-})
+// Stop the capture stream for good (no auto-restart). Called on backend
+// shutdown — without this, hard-killing the backend leaves the ffmpeg
+// subprocess running forever (the stdout-pipe-break theory proved false:
+// orphaned ffmpeg processes were observed surviving their parent).
+export function shutdownCapture(): void {
+  shuttingDown = true
+  if (restartTimer) {
+    clearTimeout(restartTimer)
+    restartTimer = null
+  }
+  const proc = ffmpegProc
+  ffmpegProc = null // 'close' handler treats null as already-handled, skips restart
+  try { proc?.kill() } catch { /* ignore */ }
+}
+
+process.on('exit', () => shutdownCapture())

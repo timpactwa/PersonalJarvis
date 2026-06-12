@@ -13,7 +13,19 @@ function setConnected(v: boolean): void {
 }
 
 function connect(port: number): void {
-  if (ws && (ws.readyState === WebSocket.OPEN || ws.readyState === WebSocket.CONNECTING)) return
+  if (ws && (ws.readyState === WebSocket.OPEN || ws.readyState === WebSocket.CONNECTING)) {
+    if (backendPort === port) return
+    // Backend restarted on a new port — drop the old socket silently (detach
+    // handlers first so its onclose doesn't schedule a reconnect to the dead port).
+    console.warn('[ws] backend moved from port', backendPort, 'to', port, '— reconnecting')
+    const stale = ws
+    ws = null
+    stale.onopen = null
+    stale.onclose = null
+    stale.onerror = null
+    stale.onmessage = null
+    try { stale.close() } catch { /* already closing */ }
+  }
   backendPort = port
   console.log('[ws] connecting to backend on port', port)
   ws = new WebSocket(`ws://127.0.0.1:${port}`)

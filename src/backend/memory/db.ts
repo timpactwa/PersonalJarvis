@@ -4,6 +4,7 @@ const DB_PATH = process.env.JARVIS_DB_PATH ?? join(process.cwd(), 'jarvis.db')
 
 let db: any = null
 let dbAvailable = false
+let dbError: string | null = null
 
 export function getDb(): any {
   if (!db && !dbAvailable) throw new Error('Database not available')
@@ -12,6 +13,11 @@ export function getDb(): any {
 
 export function isDbAvailable(): boolean {
   return dbAvailable
+}
+
+// First line of the load error, for surfacing in diagnostics.
+export function getDbError(): string | null {
+  return dbError
 }
 
 export function closeDb(): void {
@@ -69,10 +75,19 @@ export function initDb(): void {
       CREATE INDEX IF NOT EXISTS idx_user_events_type ON user_events(event_type);
     `)
     dbAvailable = true
+    dbError = null
     console.error('[db] SQLite ready at', DB_PATH)
   } catch (err) {
-    console.error('[db] SQLite not available — running without persistence:', (err as Error).message)
+    const msg = err instanceof Error ? err.message : String(err)
+    dbError = msg.split('\n')[0]
     dbAvailable = false
+    console.error('[db] SQLite unavailable — running WITHOUT persistence (memories, settings, and usage stats will not be saved).')
+    if (msg.includes('NODE_MODULE_VERSION')) {
+      console.error('[db] Cause: better-sqlite3 was compiled for a different runtime (system Node vs Electron ABI mismatch).')
+      console.error('[db] Fix:   npm run rebuild:native')
+    } else {
+      console.error('[db] Error:', msg)
+    }
   }
 }
 

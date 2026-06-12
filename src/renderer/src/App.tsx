@@ -1,4 +1,4 @@
-import { useCallback, useEffect } from 'react'
+import { useCallback, useEffect, useState } from 'react'
 import { useWebSocket } from './hooks/useWebSocket'
 import { useAnimState } from './hooks/useAnimState'
 import { ParticleRing } from './components/ParticleRing'
@@ -45,6 +45,13 @@ export default function App(): JSX.Element {
 
   const { send, connected } = useWebSocket(onEvent)
 
+  // Backend lifecycle status from the main process — lets the UI distinguish
+  // "still starting" from "crashed/failed" instead of spinning forever.
+  const [backendStatus, setBackendStatus] = useState<{ status: string; message?: string } | null>(null)
+  useEffect(() => {
+    ;(window as any).jarvis.onBackendStatus?.((s: { status: string; message?: string }) => setBackendStatus(s))
+  }, [])
+
   useEffect(() => {
     ;(window as any).jarvis.onPttStart(() => {
       console.log('[ptt] ptt-start (backend captures audio)')
@@ -57,6 +64,10 @@ export default function App(): JSX.Element {
   useEffect(() => {
     if (state.dashboardOpen) send({ type: 'get_usage' })
   }, [state.dashboardOpen, send])
+
+  useEffect(() => {
+    if (connected) send({ type: 'get_settings' })
+  }, [connected, send])
 
   useEffect(() => {
     if (state.settingsOpen) send({ type: 'get_settings' })
@@ -77,30 +88,36 @@ export default function App(): JSX.Element {
         tokensToday={state.tokensToday}
         costToday={state.costToday}
         model={state.model}
+        llmProvider={state.settings?.llmProvider ?? 'auto'}
+        onProviderChange={(provider) => send({ type: 'set_settings', settings: { llmProvider: provider } })}
         onStatsClick={toggleDashboard}
         textVisible={state.textVisible}
         onToggleText={toggleTextVisible}
       />
       <ErrorToast message={state.errorText} onDismiss={clearError} />
-      {!connected && (
-        <div style={{
-          position: 'absolute',
-          top: 48,
-          left: '50%',
-          transform: 'translateX(-50%)',
-          fontFamily: '"Share Tech Mono", monospace',
-          fontSize: 11,
-          color: '#92400e',
-          background: 'rgba(255, 250, 240, 0.92)',
-          padding: '4px 12px',
-          borderRadius: 6,
-          border: '1px solid rgba(180,120,20,0.25)',
-          pointerEvents: 'none',
-          zIndex: 201,
-        }}>
-          ⟳ connecting to backend...
-        </div>
-      )}
+      {!connected && (() => {
+        const bad = backendStatus?.status === 'crashed' || backendStatus?.status === 'failed'
+        return (
+          <div style={{
+            position: 'absolute',
+            top: 48,
+            left: '50%',
+            transform: 'translateX(-50%)',
+            maxWidth: '80vw',
+            fontFamily: '"Share Tech Mono", monospace',
+            fontSize: 11,
+            color: bad ? '#991b1b' : '#92400e',
+            background: bad ? 'rgba(255, 241, 241, 0.95)' : 'rgba(255, 250, 240, 0.92)',
+            padding: '4px 12px',
+            borderRadius: 6,
+            border: bad ? '1px solid rgba(180,30,30,0.35)' : '1px solid rgba(180,120,20,0.25)',
+            pointerEvents: 'none',
+            zIndex: 201,
+          }}>
+            {bad ? `✕ ${backendStatus?.message ?? 'backend stopped'}` : '⟳ connecting to backend...'}
+          </div>
+        )
+      })()}
       <Transcript history={state.history} streamingText={state.streamingText} visible={state.textVisible} />
       <TextInput
         disabled={busy || !connected}
