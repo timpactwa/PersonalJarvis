@@ -64,6 +64,7 @@ export function getToolsForAgent(): Tool[] {
     ...commandToolDefs,
     ...visionToolDefs,
     ...githubToolDefs,
+    ...spotifyToolDefs,
   ] as Tool[]
 }
 
@@ -82,6 +83,7 @@ export async function handleTool(name: string, input: Record<string, unknown>): 
   else if (name.startsWith('jarvis_'))    result = await handleJarvisTool(name, input)
   else if (name.startsWith('command_'))   result = await handleCommandTool(name, input)
   else if (name.startsWith('github_'))   result = await handleGithubTool(name, input)
+  else if (name.startsWith('spotify_'))  result = await handleSpotifyTool(name, input)
   else throw new Error(`Unknown tool: ${name}`)
 
   // Preference learning — track usage (fire-and-forget, non-critical)

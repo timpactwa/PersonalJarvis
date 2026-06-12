@@ -11,6 +11,9 @@ const DEFAULTS: Settings = {
   ollamaModel: process.env.OLLAMA_MODEL ?? 'llama3.1:8b',
   ollamaBaseUrl: process.env.OLLAMA_BASE_URL ?? 'http://127.0.0.1:11434',
   userProfile: '',
+  spotifyAccessToken: '',
+  spotifyExpiresAt: 0,
+  spotifyRefreshToken: '',
 }
 
 export function getSettings(): Settings {
@@ -42,6 +45,9 @@ export function getSettings(): Settings {
     ollamaModel: map.get('ollamaModel') ?? DEFAULTS.ollamaModel,
     ollamaBaseUrl: map.get('ollamaBaseUrl') ?? DEFAULTS.ollamaBaseUrl,
     userProfile: map.get('userProfile') ?? DEFAULTS.userProfile,
+    spotifyAccessToken: map.get('spotifyAccessToken') ?? DEFAULTS.spotifyAccessToken,
+    spotifyExpiresAt: map.has('spotifyExpiresAt') ? Number(map.get('spotifyExpiresAt')) : DEFAULTS.spotifyExpiresAt,
+    spotifyRefreshToken: map.get('spotifyRefreshToken') ?? DEFAULTS.spotifyRefreshToken,
   }
 }
 

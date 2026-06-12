@@ -14,6 +14,9 @@ export interface Settings {
   ollamaBaseUrl: string
   /** Free-text "about me" the user authors; injected into Jarvis's context each turn. */
   userProfile: string
+  spotifyAccessToken: string
+  spotifyExpiresAt: number
+  spotifyRefreshToken: string
 }
 
 export interface AgentInfo {
