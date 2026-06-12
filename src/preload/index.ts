@@ -38,7 +38,9 @@ contextBridge.exposeInMainWorld('jarvis', {
   onPttStop: (cb: () => void) => { pttStopCallback = cb },
   onScreenshotCaptured: (cb: (data: { imageBase64: string; mimeType: string }) => void) =>
     ipcRenderer.on('screenshot-captured', (_e, data) => cb(data)),
+  offScreenshotCaptured: () => ipcRenderer.removeAllListeners('screenshot-captured'),
   setHotkey: (accelerator: string) => ipcRenderer.send('set-hotkey', accelerator),
+  setScreenshotHotkey: (hotkey: string) => ipcRenderer.send('set-screenshot-hotkey', hotkey),
   windowControls: {
     minimize: () => ipcRenderer.send('window-minimize'),
     maximize: () => ipcRenderer.send('window-maximize'),

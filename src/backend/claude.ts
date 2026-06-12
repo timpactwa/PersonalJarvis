@@ -121,6 +121,7 @@ export async function chat(
   memories: string[],
   broadcast: (e: BackendEvent) => void,
   imageBase64?: string,
+  imageMimeType?: string,
 ): Promise<ChatResult> {
   const client = getClient()
   const model = selectModel(userText)
@@ -131,9 +132,10 @@ export async function chat(
     ? `\n\nRelevant context about the user:\n${memories.map(m => `- ${m}`).join('\n')}`
     : ''
 
+  const mediaType = (imageMimeType ?? 'image/png') as 'image/png' | 'image/jpeg' | 'image/gif' | 'image/webp'
   const userContent: Anthropic.Messages.ContentBlockParam[] = imageBase64
     ? [
-        { type: 'image', source: { type: 'base64', media_type: 'image/png', data: imageBase64 } },
+        { type: 'image', source: { type: 'base64', media_type: mediaType, data: imageBase64 } },
         { type: 'text', text: userText },
       ]
     : [{ type: 'text', text: userText }]

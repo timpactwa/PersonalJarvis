@@ -308,8 +308,8 @@ app.whenReady().then(() => {
 
   // Screenshot hotkey — captures the primary screen and ships it to the
   // renderer, which forwards it to the backend as an image_attach event.
-  const screenshotHotkeyStr = 'Alt+Shift+S'
-  globalShortcut.register(screenshotHotkeyStr, async () => {
+  let screenshotHotkeyStr = 'Alt+Shift+S'
+  const screenshotHandler = async (): Promise<void> => {
     try {
       const sources = await desktopCapturer.getSources({
         types: ['screen'],
@@ -324,10 +324,21 @@ app.whenReady().then(() => {
     } catch (err) {
       console.error('[main] screenshot error:', err)
     }
-  })
+  }
+  globalShortcut.register(screenshotHotkeyStr, screenshotHandler)
   console.log(`[main] screenshot hotkey registered — ${screenshotHotkeyStr}`)
 
   ipcMain.on('set-hotkey', (_e, _accelerator: string) => { /* reserved */ })
+  ipcMain.on('set-screenshot-hotkey', (_e, newHotkey: string) => {
+    globalShortcut.unregister(screenshotHotkeyStr)
+    screenshotHotkeyStr = newHotkey
+    try {
+      globalShortcut.register(newHotkey, screenshotHandler)
+      console.log('[main] screenshot hotkey updated to:', newHotkey)
+    } catch (err) {
+      console.error('[main] failed to register screenshot hotkey:', newHotkey, err)
+    }
+  })
   ipcMain.on('window-minimize', () => mainWindow?.minimize())
   ipcMain.on('window-maximize', () => {
     if (!mainWindow) return

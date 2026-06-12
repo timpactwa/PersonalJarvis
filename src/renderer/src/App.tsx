@@ -33,6 +33,11 @@ export default function App(): JSX.Element {
       ;(window as any).jarvis?.setHotkey?.(event.hotkey)
     }
 
+    if (event.type === 'screenshot_hotkey_changed') {
+      ;(window as any).jarvis?.setScreenshotHotkey?.(event.hotkey)
+      return
+    }
+
     if (event.type === 'audio') {
       const audioData = event.data as unknown as ArrayBuffer
       const blob = new Blob([audioData], { type: 'audio/mpeg' })
@@ -147,9 +152,13 @@ export default function App(): JSX.Element {
 
   // Screenshot hotkey (main process) → forward capture to the backend
   useEffect(() => {
-    ;(window as any).jarvis?.onScreenshotCaptured?.((data: { imageBase64: string; mimeType: string }) => {
+    const jarvis = (window as any).jarvis
+    jarvis?.onScreenshotCaptured?.((data: { imageBase64: string; mimeType: string }) => {
       send({ type: 'image_attach', imageBase64: data.imageBase64, mimeType: data.mimeType })
     })
+    return () => {
+      jarvis?.offScreenshotCaptured?.()
+    }
   }, [send])
 
   // Drag-and-drop image attach

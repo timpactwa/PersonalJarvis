@@ -682,7 +682,7 @@ async function runConversation(userText: string): Promise<void> {
   if (useVision) console.error('[pipeline] vision turn — forced Claude')
 
   const { text, model, inputTokens, outputTokens, pendingMemory, pendingEntities } = useVision
-    ? await chatClaude(userText, conversationHistory, topMems, broadcast, attachedImage!.imageBase64)
+    ? await chatClaude(userText, conversationHistory, topMems, broadcast, attachedImage!.imageBase64, attachedImage!.mimeType)
     : await chat(userText, conversationHistory, topMems, broadcast)
 
   // Re-strip handles raw text from providers that don't pre-strip (e.g. Ollama); no-op for Groq/Claude.
