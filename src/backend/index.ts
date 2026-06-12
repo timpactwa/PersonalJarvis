@@ -673,6 +673,7 @@ async function runConversation(userText: string): Promise<void> {
     broadcast,
   )
 
+  // Re-strip handles raw text from providers that don't pre-strip (e.g. Ollama); no-op for Groq/Claude.
   const cleaned = stripResponseTags(text)
   const finalText = cleaned.text
 
