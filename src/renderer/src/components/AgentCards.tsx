@@ -1,5 +1,6 @@
 import { useState } from 'react'
 import type { AgentInfo } from '../../../backend/types'
+import { AgentLogModal } from './AgentLogModal'
 
 interface Props {
   agents: AgentInfo[]
@@ -30,6 +31,7 @@ export function AgentCards({ agents, onClose }: Props): JSX.Element | null {
 function AgentCard({ agent, onClose }: { agent: AgentInfo; onClose: (id: string) => void }): JSX.Element {
   const [expanded, setExpanded] = useState(false)
   const [copied, setCopied] = useState(false)
+  const [logOpen, setLogOpen] = useState(false)
   const last = agent.actions[agent.actions.length - 1] ?? 'Starting…'
   const color = STATUS_COLOR[agent.status]
   const done = agent.status === 'done'
@@ -85,6 +87,11 @@ function AgentCard({ agent, onClose }: { agent: AgentInfo; onClose: (id: string)
             {expanded ? '▴ LOG' : '▾ LOG'}
           </button>
         )}
+        {done && (
+          <button className="pill-btn" style={{ fontSize: 9, padding: '3px 10px' }} onClick={() => setLogOpen(true)}>
+            ▾ LOG
+          </button>
+        )}
         {done && agent.result && (
           <button className="pill-btn" style={{ fontSize: 9, padding: '3px 10px' }} onClick={copy}>
             {copied ? 'COPIED' : 'COPY'}
@@ -94,6 +101,7 @@ function AgentCard({ agent, onClose }: { agent: AgentInfo; onClose: (id: string)
           {done ? 'DISMISS' : '✕'}
         </button>
       </div>
+      {logOpen && <AgentLogModal agent={agent} onClose={() => setLogOpen(false)} />}
     </div>
   )
 }
