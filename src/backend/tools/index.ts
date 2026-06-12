@@ -7,6 +7,7 @@ import { agentToolDefs, handleAgentTool } from '../agents'
 import { searchToolDefs, handleSearchTool } from './search'
 import { jarvisToolDefs, handleJarvisTool } from './jarvis'
 import { commandToolDefs, handleCommandTool } from './commands'
+import { visionToolDefs, handleVisionTool } from './vision'
 import { insertUserEvent } from '../memory/db'
 import type { Tool } from '@anthropic-ai/sdk/resources'
 
@@ -22,6 +23,7 @@ export function getTools(): Tool[] {
     ...searchToolDefs,
     ...jarvisToolDefs,
     ...commandToolDefs,
+    ...visionToolDefs,
   ] as Tool[]
 }
 
@@ -37,6 +39,7 @@ export function getToolsForGroq(): Tool[] {
     ...searchToolDefs,
     ...jarvisToolDefs,
     ...commandToolDefs,
+    ...visionToolDefs,
   ] as Tool[]
 }
 
@@ -53,6 +56,7 @@ export function getToolsForAgent(): Tool[] {
     ...searchToolDefs,
     ...jarvisToolDefs,
     ...commandToolDefs,
+    ...visionToolDefs,
   ] as Tool[]
 }
 
@@ -67,6 +71,7 @@ export async function handleTool(name: string, input: Record<string, unknown>): 
   else if (name === 'vscode_open')        result = await handleVSCodeTool(name, input)
   else if (name === 'spawn_agent')        result = await handleAgentTool(name, input as Record<string, string>)
   else if (name.startsWith('web_'))       result = await handleSearchTool(name, input)
+  else if (name === 'jarvis_screenshot')  result = await handleVisionTool(name, input)
   else if (name.startsWith('jarvis_'))    result = await handleJarvisTool(name, input)
   else if (name.startsWith('command_'))   result = await handleCommandTool(name, input)
   else throw new Error(`Unknown tool: ${name}`)
