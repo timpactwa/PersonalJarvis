@@ -5,6 +5,8 @@ import { executeToolDefs, handleExecuteTool } from './execute'
 import { vscodeToolDefs, handleVSCodeTool } from './vscode'
 import { agentToolDefs, handleAgentTool } from '../agents'
 import { searchToolDefs, handleSearchTool } from './search'
+import { jarvisToolDefs, handleJarvisTool } from './jarvis'
+import { commandToolDefs, handleCommandTool } from './commands'
 import { insertUserEvent } from '../memory/db'
 import type { Tool } from '@anthropic-ai/sdk/resources'
 
@@ -18,6 +20,8 @@ export function getTools(): Tool[] {
     ...vscodeToolDefs,
     ...agentToolDefs,
     ...searchToolDefs,
+    ...jarvisToolDefs,
+    ...commandToolDefs,
   ] as Tool[]
 }
 
@@ -30,8 +34,9 @@ export function getToolsForGroq(): Tool[] {
     ...gmailToolDefs,
     ...calendarToolDefs,
     ...vscodeToolDefs,
-    ...agentToolDefs,
     ...searchToolDefs,
+    ...jarvisToolDefs,
+    ...commandToolDefs,
   ] as Tool[]
 }
 
@@ -46,6 +51,8 @@ export function getToolsForAgent(): Tool[] {
     ...executeToolDefs,
     ...vscodeToolDefs,
     ...searchToolDefs,
+    ...jarvisToolDefs,
+    ...commandToolDefs,
   ] as Tool[]
 }
 
@@ -60,6 +67,8 @@ export async function handleTool(name: string, input: Record<string, unknown>): 
   else if (name === 'vscode_open')        result = await handleVSCodeTool(name, input)
   else if (name === 'spawn_agent')        result = await handleAgentTool(name, input as Record<string, string>)
   else if (name.startsWith('web_'))       result = await handleSearchTool(name, input)
+  else if (name.startsWith('jarvis_'))    result = await handleJarvisTool(name, input)
+  else if (name.startsWith('command_'))   result = await handleCommandTool(name, input)
   else throw new Error(`Unknown tool: ${name}`)
 
   // Preference learning — track usage (fire-and-forget, non-critical)

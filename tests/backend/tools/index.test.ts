@@ -39,6 +39,22 @@ vi.mock('../../../src/backend/tools/search', () => ({
   handleSearchTool: vi.fn(async () => 'search result'),
 }))
 
+vi.mock('../../../src/backend/tools/commands', () => ({
+  commandToolDefs: [
+    { name: 'command_register', description: 'register', input_schema: { type: 'object', properties: {}, required: [] } },
+  ],
+  handleCommandTool: vi.fn(async () => 'command result'),
+}))
+
+vi.mock('../../../src/backend/tools/jarvis', () => ({
+  jarvisToolDefs: [
+    { name: 'jarvis_get_settings', description: 'settings', input_schema: { type: 'object', properties: {}, required: [] } },
+    { name: 'jarvis_set_settings', description: 'set', input_schema: { type: 'object', properties: {}, required: [] } },
+    { name: 'jarvis_get_usage', description: 'usage', input_schema: { type: 'object', properties: {}, required: [] } },
+  ],
+  handleJarvisTool: vi.fn(async () => 'jarvis result'),
+}))
+
 vi.mock('../../../src/backend/memory/db', () => ({
   insertUserEvent: vi.fn(),
 }))
@@ -61,6 +77,8 @@ describe('tool registry', () => {
       expect(names).toContain('spawn_agent')
       expect(names).toContain('web_search')
       expect(names).toContain('web_read')
+      expect(names).toContain('jarvis_get_settings')
+      expect(names).toContain('command_register')
     })
   })
 
@@ -76,6 +94,12 @@ describe('tool registry', () => {
       const names = getToolsForGroq().map(t => (t as any).name)
       expect(names).toContain('web_search')
       expect(names).toContain('app_launch')
+    })
+
+    it('does not include spawn_agent (causes Groq HTTP 400)', async () => {
+      const { getToolsForGroq } = await import('../../../src/backend/tools/index')
+      const names = getToolsForGroq().map(t => (t as any).name)
+      expect(names).not.toContain('spawn_agent')
     })
   })
 
@@ -153,6 +177,22 @@ describe('handleTool dispatch', () => {
     const result = await handleTool('web_search', { query: 'test' })
     expect(result).toBe('search result')
     expect(vi.mocked(handleSearchTool)).toHaveBeenCalledWith('web_search', { query: 'test' })
+  })
+
+  it('routes command_ prefix to commands handler', async () => {
+    const { handleCommandTool } = await import('../../../src/backend/tools/commands')
+    const { handleTool } = await import('../../../src/backend/tools/index')
+    const result = await handleTool('command_list', {})
+    expect(result).toBe('command result')
+    expect(vi.mocked(handleCommandTool)).toHaveBeenCalledWith('command_list', {})
+  })
+
+  it('routes jarvis_ prefix to jarvis handler', async () => {
+    const { handleJarvisTool } = await import('../../../src/backend/tools/jarvis')
+    const { handleTool } = await import('../../../src/backend/tools/index')
+    const result = await handleTool('jarvis_get_usage', { days: 7 })
+    expect(result).toBe('jarvis result')
+    expect(vi.mocked(handleJarvisTool)).toHaveBeenCalledWith('jarvis_get_usage', { days: 7 })
   })
 
   it('throws for an unknown tool name', async () => {
