@@ -11,6 +11,7 @@ import { Dashboard } from './components/Dashboard'
 import { ConfirmCard } from './components/ConfirmCard'
 import { AgentCards } from './components/AgentCards'
 import { SettingsPanel } from './components/SettingsPanel'
+import { MemoryBrowser } from './components/MemoryBrowser'
 import { ListeningIndicator } from './components/ListeningIndicator'
 import { EmailComposer } from './components/EmailComposer'
 import { EmailViewer } from './components/EmailViewer'
@@ -19,7 +20,7 @@ import type { BackendEvent, EmailDraft } from '../../backend/types'
 import './styles/global.css'
 
 export default function App(): JSX.Element {
-  const { state, handleEvent, toggleDashboard, toggleSettings, clearError, closeCompose, closeViewer, openCompose, closeEvent, toggleTextVisible } = useAnimState()
+  const { state, handleEvent, toggleDashboard, toggleSettings, clearError, closeCompose, closeViewer, openCompose, closeEvent, toggleTextVisible, toggleMemories } = useAnimState()
 
   const onEvent = useCallback((event: BackendEvent) => {
     handleEvent(event)
@@ -72,6 +73,10 @@ export default function App(): JSX.Element {
   useEffect(() => {
     if (state.settingsOpen) send({ type: 'get_settings' })
   }, [state.settingsOpen, send])
+
+  useEffect(() => {
+    if (state.memoriesOpen) send({ type: 'get_memories' })
+  }, [state.memoriesOpen, send])
 
   // Only block input while a request is in flight; typing while Jarvis is
   // speaking (or listening) is fine.
@@ -177,6 +182,13 @@ export default function App(): JSX.Element {
         onClose={toggleSettings}
         onSave={(partial) => send({ type: 'set_settings', settings: partial })}
         onHotkeyChange={(accel) => (window as any).jarvis.setHotkey(accel)}
+        onOpenMemories={() => { toggleSettings(); toggleMemories() }}
+      />
+      <MemoryBrowser
+        open={state.memoriesOpen}
+        memories={state.memories}
+        onClose={toggleMemories}
+        onDelete={(id) => send({ type: 'delete_memory', id })}
       />
     </div>
   )

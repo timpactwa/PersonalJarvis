@@ -1,5 +1,5 @@
 import { useState, useCallback } from 'react'
-import type { AnimState, BackendEvent, AgentInfo, Settings, UsagePoint, ModelUsage, EmailDraft, EmailMessage, CalendarEventDraft } from '../../../backend/types'
+import type { AnimState, BackendEvent, AgentInfo, Settings, UsagePoint, ModelUsage, EmailDraft, EmailMessage, CalendarEventDraft, MemoryEntry } from '../../../backend/types'
 
 export interface PendingConfirm {
   id: string
@@ -34,6 +34,8 @@ export interface JarvisState {
   viewer: EmailMessage[] | null
   eventDraft: CalendarEventDraft | null
   textVisible: boolean
+  memoriesOpen: boolean
+  memories: MemoryEntry[]
 }
 
 const initial: JarvisState = {
@@ -57,15 +59,11 @@ const initial: JarvisState = {
   viewer: null,
   eventDraft: null,
   textVisible: true,
+  memoriesOpen: false,
+  memories: [],
 }
 
-export function useAnimState(): {
-  state: JarvisState
-  handleEvent: (event: BackendEvent) => void
-  toggleDashboard: () => void
-  toggleSettings: () => void
-  clearError: () => void
-} {
+export function useAnimState() {
   const [state, setState] = useState<JarvisState>(initial)
 
   const handleEvent = useCallback((event: BackendEvent) => {
@@ -114,6 +112,8 @@ export function useAnimState(): {
           return { ...prev, eventDraft: event.event }
         case 'toggle_text':
           return { ...prev, textVisible: !prev.textVisible }
+        case 'memories':
+          return { ...prev, memories: event.memories }
         default:
           return prev
       }
@@ -128,6 +128,7 @@ export function useAnimState(): {
   const openCompose = useCallback((draft: EmailDraft) => setState(prev => ({ ...prev, compose: draft })), [])
   const closeEvent = useCallback(() => setState(prev => ({ ...prev, eventDraft: null })), [])
   const toggleTextVisible = useCallback(() => setState(prev => ({ ...prev, textVisible: !prev.textVisible })), [])
+  const toggleMemories = useCallback(() => setState(prev => ({ ...prev, memoriesOpen: !prev.memoriesOpen })), [])
 
-  return { state, handleEvent, toggleDashboard, toggleSettings, clearError, closeCompose, closeViewer, openCompose, closeEvent, toggleTextVisible }
+  return { state, handleEvent, toggleDashboard, toggleSettings, clearError, closeCompose, closeViewer, openCompose, closeEvent, toggleTextVisible, toggleMemories }
 }
