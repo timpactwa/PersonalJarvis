@@ -7,6 +7,7 @@ import { Transcript } from './components/Transcript'
 import { TextInput } from './components/TextInput'
 import { TitleBar } from './components/TitleBar'
 import { ErrorToast } from './components/ErrorToast'
+import { CompletionToast } from './components/CompletionToast'
 import { Dashboard } from './components/Dashboard'
 import { ConfirmCard } from './components/ConfirmCard'
 import { AgentCards } from './components/AgentCards'
@@ -20,7 +21,7 @@ import type { BackendEvent, EmailDraft } from '../../backend/types'
 import './styles/global.css'
 
 export default function App(): JSX.Element {
-  const { state, handleEvent, toggleDashboard, toggleSettings, clearError, closeCompose, closeViewer, openCompose, closeEvent, toggleTextVisible, toggleMemories } = useAnimState()
+  const { state, handleEvent, toggleDashboard, toggleSettings, clearError, closeCompose, closeViewer, openCompose, closeEvent, toggleTextVisible, toggleMemories, dismissToast } = useAnimState()
 
   const onEvent = useCallback((event: BackendEvent) => {
     handleEvent(event)
@@ -100,6 +101,7 @@ export default function App(): JSX.Element {
         onToggleText={toggleTextVisible}
       />
       <ErrorToast message={state.errorText} onDismiss={clearError} />
+      <CompletionToast toasts={state.toasts} onDismiss={dismissToast} />
       {!connected && (() => {
         const bad = backendStatus?.status === 'crashed' || backendStatus?.status === 'failed'
         return (

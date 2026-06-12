@@ -13,6 +13,8 @@ export interface ConversationTurn {
   text: string
 }
 
+export interface Toast { id: number; text: string }
+
 export interface JarvisState {
   anim: AnimState
   tokensToday: number
@@ -36,6 +38,7 @@ export interface JarvisState {
   textVisible: boolean
   memoriesOpen: boolean
   memories: MemoryEntry[]
+  toasts: Toast[]
 }
 
 const initial: JarvisState = {
@@ -61,6 +64,7 @@ const initial: JarvisState = {
   textVisible: true,
   memoriesOpen: false,
   memories: [],
+  toasts: [],
 }
 
 export function useAnimState() {
@@ -96,8 +100,15 @@ export function useAnimState() {
           return { ...prev, agents: [...prev.agents, { id: event.id, name: event.name, task: event.task, status: 'running', actions: [], startedAt: Date.now() }] }
         case 'agent_update':
           return { ...prev, agents: prev.agents.map(a => a.id === event.id ? { ...a, actions: [...a.actions, event.action] } : a) }
-        case 'agent_done':
-          return { ...prev, agents: prev.agents.map(a => a.id === event.id ? { ...a, status: 'done', result: event.result } : a) }
+        case 'agent_done': {
+          const agent = prev.agents.find(a => a.id === event.id)
+          const toast: Toast = { id: Date.now() + Math.random(), text: `Agent complete: ${agent?.name ?? 'subagent'}` }
+          return {
+            ...prev,
+            agents: prev.agents.map(a => a.id === event.id ? { ...a, status: 'done', result: event.result } : a),
+            toasts: [...prev.toasts, toast],
+          }
+        }
         case 'agent_error':
           return { ...prev, agents: prev.agents.map(a => a.id === event.id ? { ...a, status: 'error', result: event.message } : a) }
         case 'usage':
@@ -129,6 +140,7 @@ export function useAnimState() {
   const closeEvent = useCallback(() => setState(prev => ({ ...prev, eventDraft: null })), [])
   const toggleTextVisible = useCallback(() => setState(prev => ({ ...prev, textVisible: !prev.textVisible })), [])
   const toggleMemories = useCallback(() => setState(prev => ({ ...prev, memoriesOpen: !prev.memoriesOpen })), [])
+  const dismissToast = useCallback((id: number) => setState(prev => ({ ...prev, toasts: prev.toasts.filter(t => t.id !== id) })), [])
 
-  return { state, handleEvent, toggleDashboard, toggleSettings, clearError, closeCompose, closeViewer, openCompose, closeEvent, toggleTextVisible, toggleMemories }
+  return { state, handleEvent, toggleDashboard, toggleSettings, clearError, closeCompose, closeViewer, openCompose, closeEvent, toggleTextVisible, toggleMemories, dismissToast }
 }
