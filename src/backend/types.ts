@@ -5,6 +5,7 @@ export type LlmProvider = 'auto' | 'claude' | 'groq' | 'ollama'
 
 export interface Settings {
   hotkey: string
+  screenshotHotkey: string
   voiceId: string
   llmProvider: LlmProvider
   modelPreference: 'auto' | 'fable' | 'haiku'
@@ -28,6 +29,25 @@ export interface AgentInfo {
 export interface UsagePoint { date: string; tokens: number; cost: number }
 export interface ModelUsage { model: string; tokens: number; cost: number }
 export interface MemoryEntry { id: number; text: string; createdAt: number }
+
+export type CustomCommandKind = 'exe' | 'uri' | 'shell'
+
+export interface CustomCommand {
+  id: string
+  label: string
+  aliases: string[]
+  target: string
+  kind: CustomCommandKind
+  updatedAt: number
+}
+
+export interface CustomCommandDraft {
+  id: string
+  label: string
+  aliases: string[]
+  target: string
+  kind: CustomCommandKind
+}
 
 export interface EmailDraft {
   id: string
@@ -69,11 +89,15 @@ export type BackendEvent =
   | { type: 'agent_error'; id: string; message: string }
   | { type: 'usage'; daily: UsagePoint[]; byModel: ModelUsage[] }
   | { type: 'settings'; settings: Settings }
+  | { type: 'hotkey_changed'; hotkey: string }
+  | { type: 'command_compose'; draft: CustomCommandDraft }
   | { type: 'email_compose'; draft: EmailDraft }
   | { type: 'email_view'; emails: EmailMessage[] }
   | { type: 'event_compose'; event: CalendarEventDraft }
   | { type: 'toggle_text' }
   | { type: 'memories'; memories: MemoryEntry[] }
+  | { type: 'report'; format: 'html' | 'md'; content: string }
+  | { type: 'screenshot_request'; prompt: string }
 
 // Events sent from renderer → backend
 export type RendererEvent =
@@ -87,6 +111,11 @@ export type RendererEvent =
   | { type: 'set_settings'; settings: Partial<Settings> }
   | { type: 'email_send'; draft: EmailDraft }
   | { type: 'email_draft_save'; draft: EmailDraft }
+  | { type: 'email_compose_dismissed'; draft: EmailDraft }
+  | { type: 'command_save'; draft: CustomCommandDraft }
+  | { type: 'command_compose_dismissed'; draft: CustomCommandDraft }
+  | { type: 'command_delete'; id: string }
   | { type: 'event_create'; event: CalendarEventDraft }
   | { type: 'get_memories' }
   | { type: 'delete_memory'; id: number }
+  | { type: 'image_attach'; imageBase64: string; mimeType: string }
