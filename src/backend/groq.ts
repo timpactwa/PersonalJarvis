@@ -84,7 +84,7 @@ interface GroqResponse {
   usage?: { prompt_tokens: number; completion_tokens: number }
 }
 
-const MAX_STEPS = 5
+const MAX_STEPS = 10
 
 interface ParsedToolCall {
   name: string

@@ -99,7 +99,7 @@ export interface ChatResult {
   pendingEntities: PendingEntity[]
 }
 
-const MAX_STEPS = 6
+const MAX_STEPS = 12
 
 // Lazily initialised so dotenv has run before we read the env vars
 let _client: Anthropic | null = null

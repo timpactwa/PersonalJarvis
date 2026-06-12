@@ -706,7 +706,7 @@ async function runConversation(userText: string): Promise<void> {
 
   conversationHistory.push({ role: 'user', content: userText })
   conversationHistory.push({ role: 'assistant', content: finalText })
-  while (conversationHistory.length > 40) {
+  while (conversationHistory.length > 60) {
     conversationHistory.splice(0, 2)
   }
 
