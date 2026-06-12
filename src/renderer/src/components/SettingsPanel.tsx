@@ -11,12 +11,14 @@ interface Props {
 }
 
 const DRAWER_W = 340
+const LAYER_Z = 550 // above TitleBar (500)
 
 export function SettingsPanel({ open, settings, onClose, onSave, onHotkeyChange, onOpenMemories }: Props): JSX.Element | null {
   const [draft, setDraft] = useState<Settings | null>(settings)
   useEffect(() => { setDraft(settings) }, [settings])
 
   if (!draft) return null
+  if (!open) return null
 
   const save = (): void => {
     onSave(draft)
@@ -38,24 +40,22 @@ export function SettingsPanel({ open, settings, onClose, onSave, onHotkeyChange,
   return (
     <>
       <div
+        className="no-drag"
         onClick={onClose}
         style={{
-          position: 'absolute', inset: 0,
+          position: 'fixed', inset: 0,
           background: 'rgba(200,220,240,0.25)', backdropFilter: 'blur(2px)',
-          opacity: open ? 1 : 0, pointerEvents: open ? 'auto' : 'none',
-          transition: 'opacity 0.25s', zIndex: 129,
+          zIndex: LAYER_Z,
         }}
       />
       <div
         className="no-drag"
         style={{
-          position: 'absolute', top: 0, right: 0, height: '100vh', width: DRAWER_W,
+          position: 'fixed', top: 36, right: 0, height: 'calc(100vh - 36px)', width: DRAWER_W,
           background: 'rgba(255,255,255,0.96)', borderLeft: '1px solid rgba(3,105,161,0.15)',
           backdropFilter: 'blur(20px)', boxShadow: '-8px 0 40px rgba(3,80,140,0.12)',
-          padding: 24, zIndex: 130, overflowY: 'auto',
+          padding: 24, zIndex: LAYER_Z + 1, overflowY: 'auto',
           fontFamily: 'var(--font-hud)', color: 'var(--text)',
-          transform: open ? 'translateX(0)' : `translateX(${DRAWER_W}px)`,
-          transition: 'transform 0.25s ease',
         }}
       >
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 24 }}>
@@ -75,6 +75,8 @@ export function SettingsPanel({ open, settings, onClose, onSave, onHotkeyChange,
         <div style={sectionLabel}>VOICE</div>
         <label style={label}>PUSH-TO-TALK HOTKEY</label>
         <input style={field} value={draft.hotkey} onChange={e => setDraft({ ...draft, hotkey: e.target.value })} placeholder="Alt+Space" />
+        <label style={label}>SCREENSHOT HOTKEY</label>
+        <input style={field} value={draft.screenshotHotkey} onChange={e => setDraft({ ...draft, screenshotHotkey: e.target.value })} placeholder="Alt+Shift+S" />
         <label style={label}>ELEVENLABS VOICE ID</label>
         <input style={field} value={draft.voiceId} onChange={e => setDraft({ ...draft, voiceId: e.target.value })} />
 
