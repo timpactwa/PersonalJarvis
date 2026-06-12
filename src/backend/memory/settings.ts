@@ -3,6 +3,7 @@ import type { LlmProvider, Settings } from '../types'
 
 const DEFAULTS: Settings = {
   hotkey: 'Alt+Space',
+  screenshotHotkey: 'Alt+Shift+S',
   voiceId: process.env.ELEVENLABS_VOICE_ID ?? 'pqHfZKP75CvOlQylNhV4',
   llmProvider: 'auto',
   modelPreference: 'auto',
@@ -33,6 +34,7 @@ export function getSettings(): Settings {
 
   return {
     hotkey: map.get('hotkey') ?? DEFAULTS.hotkey,
+    screenshotHotkey: map.get('screenshotHotkey') ?? DEFAULTS.screenshotHotkey,
     voiceId: map.get('voiceId') ?? DEFAULTS.voiceId,
     llmProvider,
     modelPreference,
