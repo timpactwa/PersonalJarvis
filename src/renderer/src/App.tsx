@@ -354,8 +354,12 @@ export default function App(): JSX.Element {
         onDelete={(id) => send({ type: 'delete_memory', id })}
       />
       <ReportPanel content={state.reportContent} onClose={clearReport} />
-      <SpotifyPanel open={state.spotifyOpen} onClose={toggleSpotify} send={send} />
-      <GitHubPanel open={state.githubOpen} onClose={toggleGithub} send={send} />
+      {state.spotifyOpen && (
+        <SpotifyPanel onClose={toggleSpotify} nowPlaying={state.spotifyNowPlaying} send={send} />
+      )}
+      {state.githubOpen && (
+        <GitHubPanel onClose={toggleGithub} githubData={state.githubData} send={send} />
+      )}
     </div>
   )
 }
