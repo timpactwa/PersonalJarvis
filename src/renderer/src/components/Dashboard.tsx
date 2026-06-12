@@ -94,7 +94,7 @@ export function Dashboard({ open, onClose, tokensToday, costToday, model, daily,
               fontSize: '12px',
               padding: '4px 10px',
               borderRadius: '4px',
-              fontFamily: '"Orbitron", monospace',
+              fontFamily: 'var(--font-hud)',
               letterSpacing: '0.1em',
               transition: 'all 0.2s',
             }}
@@ -149,7 +149,7 @@ export function Dashboard({ open, onClose, tokensToday, costToday, model, daily,
           style={{
             marginTop: 18, width: '100%', background: 'none',
             border: '1px solid rgba(3,105,161,0.2)', color: 'var(--accent)',
-            cursor: 'pointer', fontFamily: '"Orbitron", monospace', fontSize: 11,
+            cursor: 'pointer', fontFamily: 'var(--font-hud)', fontSize: 11,
             letterSpacing: '0.12em', padding: '8px 0', borderRadius: 4,
             transition: 'background 0.15s, border-color 0.15s',
           }}

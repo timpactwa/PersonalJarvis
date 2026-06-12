@@ -16,7 +16,7 @@ export function UsageGraph({ daily, byModel }: Props): JSX.Element {
       </div>
       <div style={{ display: 'flex', alignItems: 'flex-end', gap: 4, height: 80 }}>
         {daily.length === 0 && (
-          <div style={{ fontSize: 10, color: '#4a6a8a', fontFamily: '"Share Tech Mono", monospace' }}>No usage recorded yet.</div>
+          <div style={{ fontSize: 10, color: '#4a6a8a', fontFamily: 'var(--font-mono)' }}>No usage recorded yet.</div>
         )}
         {daily.map(d => (
           <div key={d.date} title={`${d.date}: ${d.tokens.toLocaleString()} tokens`} style={{ flex: 1, display: 'flex', flexDirection: 'column', justifyContent: 'flex-end', height: '100%' }}>
@@ -38,7 +38,7 @@ export function UsageGraph({ daily, byModel }: Props): JSX.Element {
         const pct = totalCost > 0 ? Math.round((m.cost / totalCost) * 100) : 0
         return (
           <div key={m.model} style={{ marginBottom: 6 }}>
-            <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 9, color: '#94a3b8', fontFamily: '"Share Tech Mono", monospace' }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 9, color: '#94a3b8', fontFamily: 'var(--font-mono)' }}>
               <span>{m.model}</span>
               <span>${m.cost.toFixed(4)} · {m.tokens.toLocaleString()} tok</span>
             </div>

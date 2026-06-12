@@ -109,7 +109,7 @@ export default function App(): JSX.Element {
             left: '50%',
             transform: 'translateX(-50%)',
             maxWidth: '80vw',
-            fontFamily: '"Share Tech Mono", monospace',
+            fontFamily: 'var(--font-mono)',
             fontSize: 11,
             color: bad ? '#991b1b' : '#92400e',
             background: bad ? 'rgba(255, 241, 241, 0.95)' : 'rgba(255, 250, 240, 0.92)',

@@ -29,7 +29,7 @@ export function EmailViewer({ emails, onReply, onClose }: Props): JSX.Element {
     background: 'rgba(255,255,255,0.97)',
     border: '1px solid rgba(3,105,161,0.18)',
     borderRadius: 14,
-    fontFamily: '"Orbitron", monospace',
+    fontFamily: 'var(--font-hud)',
     color: 'var(--text)',
     backdropFilter: 'blur(24px)',
     boxShadow: '0 12px 60px rgba(3,80,140,0.18)',
@@ -76,7 +76,7 @@ export function EmailViewer({ emails, onReply, onClose }: Props): JSX.Element {
   }
 
   const metaVal: React.CSSProperties = {
-    fontFamily: '"Share Tech Mono", monospace',
+    fontFamily: 'var(--font-mono)',
     fontSize: 12,
     color: 'var(--text)',
     lineHeight: 1.4,
@@ -87,7 +87,7 @@ export function EmailViewer({ emails, onReply, onClose }: Props): JSX.Element {
     flex: 1,
     overflowY: 'auto' as const,
     padding: '14px 20px',
-    fontFamily: '"Share Tech Mono", monospace',
+    fontFamily: 'var(--font-mono)',
     fontSize: 12,
     lineHeight: 1.7,
     color: 'var(--text)',
@@ -111,7 +111,7 @@ export function EmailViewer({ emails, onReply, onClose }: Props): JSX.Element {
   }
 
   const pagerBtn: React.CSSProperties = {
-    fontFamily: '"Orbitron", monospace',
+    fontFamily: 'var(--font-hud)',
     fontSize: 10,
     letterSpacing: '0.1em',
     padding: '7px 14px',
@@ -129,7 +129,7 @@ export function EmailViewer({ emails, onReply, onClose }: Props): JSX.Element {
   }
 
   const pagerCount: React.CSSProperties = {
-    fontFamily: '"Rajdhani", monospace',
+    fontFamily: 'var(--font-data)',
     fontSize: 13,
     letterSpacing: '0.1em',
     color: 'var(--text-mid)',
@@ -138,7 +138,7 @@ export function EmailViewer({ emails, onReply, onClose }: Props): JSX.Element {
   }
 
   const btnBase: React.CSSProperties = {
-    fontFamily: '"Orbitron", monospace',
+    fontFamily: 'var(--font-hud)',
     fontSize: 10,
     letterSpacing: '0.12em',
     padding: '8px 16px',
@@ -171,7 +171,7 @@ export function EmailViewer({ emails, onReply, onClose }: Props): JSX.Element {
               <button onClick={onClose} style={{ background: 'none', border: 'none', color: 'var(--text-mid)', cursor: 'pointer', fontSize: 16, padding: 4 }}>✕</button>
             </div>
           </div>
-          <div style={{ padding: 20, fontFamily: '"Share Tech Mono", monospace', fontSize: 12, color: 'var(--text-mid)' }}>
+          <div style={{ padding: 20, fontFamily: 'var(--font-mono)', fontSize: 12, color: 'var(--text-mid)' }}>
             No messages matched your query.
           </div>
         </div>
