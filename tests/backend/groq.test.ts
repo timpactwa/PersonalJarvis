@@ -1,3 +1,6 @@
+// NOTE: tools/index is mocked below, so the real getToolsForGroq cannot be tested here.
+// The regression test ensuring spawn_agent is excluded from the Groq tool set (it caused
+// Groq HTTP 400s on complex queries) lives in tests/backend/tools/index.test.ts.
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import type { BackendEvent } from '../../src/backend/types'
 
@@ -174,5 +177,64 @@ describe('groq chat', () => {
     mockFetchError(500, 'Internal Server Error')
     const { chat } = await import('../../src/backend/groq')
     await expect(chat('hi', [], [], () => {})).rejects.toThrow('500')
+  })
+
+  it('recovers gmail_compose from Groq tool_use_failed XML output', async () => {
+    const { handleTool } = await import('../../src/backend/tools/index')
+    vi.mocked(handleTool).mockResolvedValueOnce('composer opened')
+
+    const toolUseFailedBody = JSON.stringify({
+      error: {
+        code: 'tool_use_failed',
+        failed_generation: '<function=gmail_compose>{"to": "mom", "subject": "Hello", "body": "Hi there"}</function>\n',
+      },
+    })
+
+    let call = 0
+    vi.stubGlobal('fetch', vi.fn(async () => {
+      call++
+      if (call === 1) {
+        return { ok: false, status: 400, json: async () => ({}), text: async () => toolUseFailedBody }
+      }
+      return { ok: true, status: 200, json: async () => reply('Email composer is ready.'), text: async () => '' }
+    }))
+
+    const { chat } = await import('../../src/backend/groq')
+    const result = await chat('send email to mom', [], [], () => {})
+    expect(handleTool).toHaveBeenCalledWith('gmail_compose', { to: 'mom', subject: 'Hello', body: 'Hi there', _suppressUi: false })
+    expect(result.text).toBe('Email composer is ready.')
+  })
+})
+
+describe('parseFailedToolGeneration', () => {
+  it('parses XML function block format', async () => {
+    const { parseFailedToolGeneration } = await import('../../src/backend/groq')
+    const body = JSON.stringify({
+      error: {
+        code: 'tool_use_failed',
+        failed_generation: '<function=gmail_compose>{"to":"mom","subject":"Hi","body":"Hello"}</function>',
+      },
+    })
+    const parsed = parseFailedToolGeneration(body)
+    expect(parsed?.name).toBe('gmail_compose')
+    expect(parsed?.arguments).toEqual({ to: 'mom', subject: 'Hi', body: 'Hello' })
+  })
+
+  it('returns null for unrelated errors', async () => {
+    const { parseFailedToolGeneration } = await import('../../src/backend/groq')
+    expect(parseFailedToolGeneration('{"error":{"code":"other"}}')).toBeNull()
+  })
+
+  it('parses tool name with embedded JSON args from error message', async () => {
+    const { parseFailedToolGeneration } = await import('../../src/backend/groq')
+    const body = JSON.stringify({
+      error: {
+        code: 'tool_use_failed',
+        message: 'tool call validation failed: attempted to call tool \'web_search [{"query": "jarvis ai cost", "count": 1}]\' which was not in request.tools',
+      },
+    })
+    const parsed = parseFailedToolGeneration(body)
+    expect(parsed?.name).toBe('web_search')
+    expect(parsed?.arguments).toEqual({ query: 'jarvis ai cost', count: 1 })
   })
 })
