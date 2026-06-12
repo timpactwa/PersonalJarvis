@@ -1,5 +1,7 @@
 import Anthropic from '@anthropic-ai/sdk'
 import type { BackendEvent } from './types'
+import { stripResponseTags, visibleStreamingText } from './responseTags'
+import { isExplicitEmailComposeRequest } from './toolGuards'
 import { getTools, handleTool } from './tools/index'
 import { getSettings } from './memory/settings'
 import { PROFILE_AND_MEMORY_NOTE } from './prompt'
@@ -33,7 +35,9 @@ export function selectModel(text: string): string {
 const SYSTEM_PROMPT = `You are Jarvis, a personal AI assistant running as a desktop overlay. Speak in a polished, concise British manner — helpful and confident without being verbose. Keep responses under 3 sentences unless detail is genuinely needed.
 
 CAPABILITIES — infer which tool to use from the user's natural language, never ask them for function names:
-• Launch apps — "open Spotify", "launch Chrome", "start Discord" → app_launch
+• Launch apps — "open Spotify", "launch Chrome", "launch rivals" → app_launch
+• Add/configure launch commands — "teach you to open X", "add a command for rivals" → command_find_executable then command_register (opens setup popup)
+• List/remove custom commands → command_list / command_remove
 • Open file/folder in VS Code — "open this project in VS Code", "edit config.ts" → vscode_open
 • Read files → fs_read | List folders → fs_list | Search files → fs_search | Write files → fs_write
 • Run scripts → execute_file (always asks confirmation first)
@@ -44,10 +48,12 @@ CAPABILITIES — infer which tool to use from the user's natural language, never
 • Search the web for current info, news, weather, prices, facts → web_search (use proactively — never say you lack real-time access without trying this first)
 • Read the full content of a URL → web_read (use after web_search for deep research)
 • Multi-step research or complex tasks → spawn_agent
+• Read/change Jarvis settings (provider, voice, hotkey, profile) → jarvis_get_settings / jarvis_set_settings
+• Usage, spending, token counts, rate limits → jarvis_get_usage (never web_search for your own usage)
 
 PERSONAL KNOWLEDGE — the user's context is injected automatically. When the user mentions someone by first name only, that person's details will appear in your context. Use it naturally without announcing it.
 
-STORING PEOPLE & PLACES: When the user introduces someone or asks you to remember a person/place/project, include a tag at the END of your reply (after your spoken response):
+STORING PEOPLE & PLACES: When saving contacts, ALWAYS speak a natural confirmation FIRST, then append invisible metadata tags at the very end. NEVER reply with only a tag. For people, include email in context when known (e.g. email: mom@example.com):
 [PERSON: name | relationship | context]
 [PLACE: name | context]
 [PROJECT: name | context]
@@ -59,6 +65,7 @@ Examples:
 STORING FACTS: For general facts use [REMEMBER: fact].
 
 RULES:
+- gmail_compose ONLY when the user explicitly asks to send/draft/compose/write an email NOW — never for past-tense or remember-only messages.
 - Use tools proactively — always attempt the tool call first, never preemptively refuse.
 - Google (Gmail + Calendar) credentials are configured on this system — always call the tool.
 - Only report a capability missing if the tool itself throws an error.
@@ -75,6 +82,7 @@ export interface PendingEntity {
   relationship: string
   context: string
   aliases: string[]
+  email?: string
 }
 
 export interface ChatResult {
@@ -112,17 +120,27 @@ export async function chat(
   history: Message[],
   memories: string[],
   broadcast: (e: BackendEvent) => void,
+  imageBase64?: string,
 ): Promise<ChatResult> {
   const client = getClient()
   const model = selectModel(userText)
+
+  if (imageBase64) console.error('[claude] vision turn — image attached')
 
   const memoryContext = memories.length > 0
     ? `\n\nRelevant context about the user:\n${memories.map(m => `- ${m}`).join('\n')}`
     : ''
 
+  const userContent: Anthropic.Messages.ContentBlockParam[] = imageBase64
+    ? [
+        { type: 'image', source: { type: 'base64', media_type: 'image/png', data: imageBase64 } },
+        { type: 'text', text: userText },
+      ]
+    : [{ type: 'text', text: userText }]
+
   const messages: Anthropic.MessageParam[] = [
     ...history.map(m => ({ role: m.role as 'user' | 'assistant', content: m.content })),
-    { role: 'user', content: userText },
+    { role: 'user', content: userContent },
   ]
 
   let fullText = ''
@@ -142,7 +160,7 @@ export async function chat(
     for await (const chunk of stream) {
       if (chunk.type === 'content_block_delta' && chunk.delta.type === 'text_delta') {
         stepText += chunk.delta.text
-        broadcast({ type: 'transcript', role: 'assistant', text: stepText, partial: true })
+        broadcast({ type: 'transcript', role: 'assistant', text: visibleStreamingText(stepText), partial: true })
       }
       if (chunk.type === 'message_start') inputTokens += chunk.message.usage.input_tokens
       if (chunk.type === 'message_delta') outputTokens += chunk.usage.output_tokens
@@ -152,7 +170,6 @@ export async function chat(
 
     if (finalMsg.stop_reason !== 'tool_use') {
       fullText = stepText
-      broadcast({ type: 'transcript', role: 'assistant', text: fullText, partial: false })
       break
     }
 
@@ -168,7 +185,13 @@ export async function chat(
     const toolResults: Anthropic.ToolResultBlockParam[] = await Promise.all(
       toolBlocks.map(async (b) => {
         try {
-          const result = await handleTool(b.name, b.input as Record<string, unknown>)
+          if (b.name === 'gmail_compose' && !isExplicitEmailComposeRequest(userText)) {
+            return { type: 'tool_result' as const, tool_use_id: b.id, content: 'No composer opened — user did not ask for a new email.' }
+          }
+          const input = b.name === 'gmail_compose'
+            ? { ...(b.input as Record<string, unknown>), _suppressUi: false }
+            : b.input as Record<string, unknown>
+          const result = await handleTool(b.name, input)
           return { type: 'tool_result' as const, tool_use_id: b.id, content: result }
         } catch (err) {
           return { type: 'tool_result' as const, tool_use_id: b.id, content: `Error: ${String(err)}`, is_error: true }
@@ -184,36 +207,9 @@ export async function chat(
     broadcast({ type: 'transcript', role: 'assistant', text: fullText, partial: false })
   }
 
-  let pendingMemory: string | null = null
-  const memMatch = fullText.match(/\[REMEMBER:\s*([^\]]+)\]/i)
-  if (memMatch) {
-    pendingMemory = memMatch[1].trim()
-    fullText = fullText.replace(memMatch[0], '').trim()
-  }
-
-  // Extract entity tags: [PERSON: name | relationship | context], [PLACE: ...], [PROJECT: ...]
-  const pendingEntities: PendingEntity[] = []
-  const entityRe = /\[(PERSON|PLACE|PROJECT|ORG):\s*([^\]]+)\]/gi
-  let entityMatch: RegExpExecArray | null
-  while ((entityMatch = entityRe.exec(fullText)) !== null) {
-    const type = entityMatch[1].toLowerCase() as PendingEntity['type']
-    const parts = entityMatch[2].split('|').map(s => s.trim())
-    const [name = '', second = '', third = ''] = parts
-    if (name) {
-      pendingEntities.push({
-        name,
-        type,
-        relationship: type === 'person' ? second : '',
-        context: type === 'person' ? third : second,
-        aliases: [],
-      })
-    }
-    fullText = fullText.replace(entityMatch[0], '').trim()
-  }
-
-  if (pendingMemory || pendingEntities.length > 0) {
-    broadcast({ type: 'transcript', role: 'assistant', text: fullText, partial: false })
-  }
+  const { text, pendingMemory, pendingEntities } = stripResponseTags(fullText)
+  fullText = text
+  broadcast({ type: 'transcript', role: 'assistant', text: fullText, partial: false })
 
   return { text: fullText, model, inputTokens, outputTokens, pendingMemory, pendingEntities }
 }
