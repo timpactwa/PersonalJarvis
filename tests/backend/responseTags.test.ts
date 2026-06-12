@@ -72,9 +72,25 @@ describe('stripResponseTags', () => {
     expect(result.pendingReport?.content).toBe(content)
   })
 
+  it('strips [REPORT: md|...] tag and returns pendingReport with md format', async () => {
+    const { stripResponseTags } = await import('../../src/backend/responseTags')
+    const result = stripResponseTags('[REPORT: md|# Headline\n- bullet]')
+    expect(result.pendingReport?.format).toBe('md')
+    expect(result.pendingReport?.content).toContain('Headline')
+    expect(result.text).not.toBe('')
+  })
+
   it('returns null pendingReport when no REPORT tag', async () => {
     const { stripResponseTags } = await import('../../src/backend/responseTags')
     expect(stripResponseTags('Hello.').pendingReport).toBeNull()
+  })
+
+  it('handles ORG entity tag', async () => {
+    const { stripResponseTags } = await import('../../src/backend/responseTags')
+    const result = stripResponseTags('Noted. [ORG: Anthropic | AI research company]')
+    expect(result.text).toBe('Noted.')
+    expect(result.pendingEntities[0].type).toBe('org')
+    expect(result.pendingEntities[0].name).toBe('Anthropic')
   })
 })
 
