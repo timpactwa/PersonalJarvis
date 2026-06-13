@@ -3,6 +3,7 @@ import { getSettings, setSettings } from '../memory/settings'
 import { getStatsToday, getUsageDaily, getUsageByModel } from '../memory/db'
 import { isChatAvailable } from '../claude'
 import { emitEvent } from '../events'
+import { createReminder, parseFireAt } from '../monitors/custom'
 
 export interface JarvisToolDef {
   name: string
@@ -71,6 +72,19 @@ export const jarvisToolDefs: JarvisToolDef[] = [
         days: { type: 'number', description: 'Days of history to include (default 7, max 30).' },
       },
       required: [],
+    },
+  },
+  {
+    name: 'jarvis_remind',
+    description:
+      'Set a reminder that Jarvis will speak aloud at a future time. Use when the user says "remind me", "set a reminder", "tell me at X", or "in N minutes tell me Y". The text parameter is what Jarvis will say when the reminder fires.',
+    input_schema: {
+      type: 'object' as const,
+      properties: {
+        text:    { type: 'string', description: 'What Jarvis will say when the reminder fires (e.g. "take a break")' },
+        fire_at: { type: 'string', description: 'When to fire: ISO 8601 ("2026-06-12T17:00:00"), relative ("in 30 minutes", "in 2 hours"), or time-of-day ("at 5pm", "at 2:30pm")' },
+      },
+      required: ['text', 'fire_at'],
     },
   },
 ]
@@ -234,6 +248,19 @@ export function getJarvisUsage(daysInput?: number): string {
   ].filter(Boolean).join('\n')
 }
 
+export function setReminder(input: Record<string, unknown>): string {
+  const text = String(input.text ?? '').trim()
+  const fireAtStr = String(input.fire_at ?? '').trim()
+  if (!text) throw new Error('Reminder text is required.')
+  if (!fireAtStr) throw new Error('fire_at is required.')
+
+  const fireAt = parseFireAt(fireAtStr)
+  const { id } = createReminder(text, fireAt)
+  const when = new Date(fireAt).toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit', hour12: true })
+  console.error(`[jarvis] reminder set: "${text}" at ${when} (id: ${id})`)
+  return `Got it — I'll remind you at ${when}.`
+}
+
 export async function handleJarvisTool(name: string, input: Record<string, unknown>): Promise<string> {
   switch (name) {
     case 'jarvis_get_settings':
@@ -250,6 +277,8 @@ export async function handleJarvisTool(name: string, input: Record<string, unkno
     }
     case 'jarvis_get_usage':
       return getJarvisUsage(Number(input.days))
+    case 'jarvis_remind':
+      return setReminder(input)
     default:
       throw new Error(`Unknown jarvis tool: ${name}`)
   }
