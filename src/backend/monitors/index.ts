@@ -43,6 +43,7 @@ export class MonitorRegistry {
   isRunning(): boolean { return this.drainTimer !== null }
 
   startAll(): void {
+    if (this.drainTimer) return   // already running — prevent double-start
     const enqueue: EnqueueFn = (a) => this.enqueue(a)
     const register: RegisterFn = (stop) => this.registerMonitor(stop)
     for (const starter of this.starters) {
@@ -62,6 +63,9 @@ export class MonitorRegistry {
   async drainOnce(): Promise<void> {
     if (!this.idle || !this.speakFn || this.queue.length === 0) return
     const now = Date.now()
+    // Remove expired alerts and un-register their IDs so monitors can re-emit them
+    const expired = this.queue.filter(a => a.expiresAt && a.expiresAt <= now)
+    for (const a of expired) this.seen.delete(a.id)
     this.queue = this.queue.filter(a => !a.expiresAt || a.expiresAt > now)
     if (this.queue.length === 0) return
     const alert = this.queue.shift()!

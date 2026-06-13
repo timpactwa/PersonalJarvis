@@ -31,6 +31,7 @@ describe('MonitorRegistry queue', () => {
     reg.enqueue(makeAlert({ id: 'd', expiresAt: Date.now() - 1 }))
     await reg.drainOnce()
     expect(speak).not.toHaveBeenCalled()
+    expect(reg.queueLength()).toBe(0)  // expired alert was actually removed
   })
 
   it('calls speakFn when idle and queue has items', async () => {
