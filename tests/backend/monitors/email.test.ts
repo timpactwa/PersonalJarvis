@@ -41,4 +41,21 @@ describe('buildEmailAlerts', () => {
     expect(alerts).toHaveLength(1)
     expect(alerts[0].text).toMatch(/5 new emails/)
   })
+
+  it('strips angle brackets and quotes from From header', () => {
+    const seen = new Set<string>()
+    const msg = {
+      id: 'mx',
+      payload: {
+        headers: [
+          { name: 'From', value: '"John Doe" <john@vt.edu>' },
+          { name: 'Subject', value: 'Test' },
+        ],
+      },
+    }
+    const alerts = buildEmailAlerts([msg], seen)
+    expect(alerts[0].text).toContain('John Doe')
+    expect(alerts[0].text).not.toContain('"')
+    expect(alerts[0].text).not.toContain('<')
+  })
 })

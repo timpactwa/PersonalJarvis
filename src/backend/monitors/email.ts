@@ -22,7 +22,9 @@ export function buildEmailAlerts(msgs: GmailMessage[], seen: Set<string>): Alert
   }
 
   return newMsgs.map(m => {
-    const from = header(m, 'From').replace(/<.*>/, '').trim() || header(m, 'From')
+    const rawFrom = header(m, 'From')
+    const displayName = rawFrom.replace(/<[^>]*>/, '').trim().replace(/^"(.*)"$/, '$1').trim()
+    const from = displayName || rawFrom
     const subject = header(m, 'Subject') || '(no subject)'
     return {
       id: `email:${m.id}`,
@@ -52,13 +54,16 @@ export function startEmailMonitor(enqueue: EnqueueFn, register: RegisterFn): voi
       if (messages.length === 0) return
 
       const full = await Promise.all(
-        messages.slice(0, 10).map(m =>
+        messages.map(m =>
           gmail.users.messages.get({ userId: 'me', id: m.id!, format: 'metadata', metadataHeaders: ['From', 'Subject'] })
         )
       )
       const alerts = buildEmailAlerts(full.map(r => r.data), seen)
+      // Always mark underlying messages as seen, even in bulk mode
+      for (const msg of full) {
+        if (msg.data.id) seen.add(`email:${msg.data.id}`)
+      }
       for (const a of alerts) {
-        if (!a.id.includes('bulk')) seen.add(a.id)
         enqueue(a)
       }
     } catch (err) {
@@ -68,4 +73,5 @@ export function startEmailMonitor(enqueue: EnqueueFn, register: RegisterFn): voi
 
   const timer = setInterval(() => { void poll() }, 3 * 60_000)
   register(() => clearInterval(timer))
+  void poll()
 }
