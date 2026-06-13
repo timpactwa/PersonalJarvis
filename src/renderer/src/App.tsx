@@ -33,6 +33,8 @@ export default function App(): JSX.Element {
   const quietModeRef = useRef(false)
   quietModeRef.current = state.quietMode
 
+  const activeAudioRef = useRef<HTMLAudioElement | null>(null)
+
   const onEvent = useCallback((event: BackendEvent) => {
     if (event.type === 'screenshot_request') {
       // Voice-triggered screenshot (jarvis_screenshot tool): ask the main
@@ -52,6 +54,20 @@ export default function App(): JSX.Element {
       return
     }
 
+    if (event.type === 'speak_text') {
+      // Web Speech API fallback when ElevenLabs is unavailable
+      if (quietModeRef.current) {
+        handleEvent({ type: 'state', state: 'idle' })
+        return
+      }
+      const utterance = new SpeechSynthesisUtterance(event.text)
+      utterance.rate = 1.1
+      utterance.onend = () => handleEvent({ type: 'state', state: 'idle' })
+      utterance.onerror = () => handleEvent({ type: 'state', state: 'idle' })
+      window.speechSynthesis.speak(utterance)
+      return
+    }
+
     if (event.type === 'audio') {
       if (quietModeRef.current) {
         handleEvent({ type: 'state', state: 'idle' })
@@ -61,6 +77,7 @@ export default function App(): JSX.Element {
       const blob = new Blob([audioData], { type: 'audio/mpeg' })
       const url = URL.createObjectURL(blob)
       const audio = new Audio(url)
+      activeAudioRef.current = audio
       // Playback drives speaking→idle; the backend no longer sends timed
       // state events around TTS, so the UI unlocks the moment audio ends.
       handleEvent({ type: 'state', state: 'speaking' })
@@ -93,10 +110,17 @@ export default function App(): JSX.Element {
       audio.onended = () => {
         URL.revokeObjectURL(url)
         cleanup()
+        activeAudioRef.current = null
         handleEvent({ type: 'state', state: 'idle' })
       }
-      audio.play().catch(err => {
-        console.error('[audio] playback error:', err)
+      const doPlay = async (): Promise<void> => {
+        if (ctx?.state === 'suspended') await ctx.resume()
+        await audio.play()
+      }
+      doPlay().catch(err => {
+        activeAudioRef.current = null
+        const detail = err instanceof DOMException ? `${err.name}: ${err.message}` : String(err)
+        console.error('[audio] playback error:', detail)
         cleanup()
         handleEvent({ type: 'state', state: 'idle' })
       })
@@ -146,7 +170,15 @@ export default function App(): JSX.Element {
       setAmplitude(0)
     }
 
-    ;(window as any).jarvis.onPttStart(() => { void startMeter() })
+    ;(window as any).jarvis.onPttStart(() => {
+      if (activeAudioRef.current) {
+        activeAudioRef.current.pause()
+        activeAudioRef.current.currentTime = 0
+        activeAudioRef.current = null
+      }
+      window.speechSynthesis.cancel()
+      void startMeter()
+    })
     ;(window as any).jarvis.onPttStop(() => { stopMeter() })
 
     return () => { stopMeter() }
