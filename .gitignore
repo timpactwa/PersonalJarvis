@@ -13,3 +13,6 @@ out/
 .vscode/
 *.log
 *.tsbuildinfo
+
+# Visual brainstorm companion
+.superpowers/
