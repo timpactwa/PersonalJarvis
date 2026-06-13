@@ -1,5 +1,5 @@
 import { getSettings } from '../memory/settings'
-import type { Alert, EnqueueFn, RegisterFn } from './index'
+import type { EnqueueFn, RegisterFn } from './index'
 
 interface SpotifyPlaybackState {
   is_playing: boolean
@@ -20,9 +20,8 @@ async function fetchPlayback(token: string): Promise<SpotifyPlaybackState | null
 export function startSpotifyMonitor(enqueue: EnqueueFn, register: RegisterFn): void {
   if (!getSettings().monitorSpotify) return
 
-  let prevIsPlaying = false
   let stoppedCount = 0
-  const seenDevices = new Set<string>()
+  let prevDeviceId: string | null = null
 
   const poll = async (): Promise<void> => {
     if (!getSettings().monitorSpotify) return
@@ -30,34 +29,29 @@ export function startSpotifyMonitor(enqueue: EnqueueFn, register: RegisterFn): v
       const token = getSettings().spotifyAccessToken
       const state = await fetchPlayback(token)
       if (!state) {
-        prevIsPlaying = false
         stoppedCount = 0
         return
       }
 
-      // Track change to non-Computer device
+      // Alert when device changes to a non-Computer type
       const device = state.device
-      if (device && device.type !== 'Computer') {
-        const devAlertId = `spotify:device:${device.id}`
-        if (!seenDevices.has(devAlertId)) {
-          seenDevices.add(devAlertId)
-          enqueue({ id: devAlertId, text: `Spotify switched to ${device.name}.`, priority: 'normal', source: 'spotify' })
-        }
+      const currentDeviceId = device?.id ?? null
+      if (device && device.type !== 'Computer' && currentDeviceId !== prevDeviceId) {
+        const devAlertId = `spotify:device:${device.id}:${Date.now()}`
+        enqueue({ id: devAlertId, text: `Spotify switched to ${device.name}.`, priority: 'normal', source: 'spotify' })
       }
+      prevDeviceId = currentDeviceId
 
-      // Playback stopped detection (2 consecutive stopped polls)
-      if (!state.is_playing && prevIsPlaying) {
+      // Playback stopped detection (2 consecutive stopped polls to filter brief pauses)
+      if (!state.is_playing) {
         stoppedCount++
-        if (stoppedCount >= 2) {
-          const trackId = state.item?.id ?? 'unknown'
-          enqueue({ id: `spotify:stopped:${trackId}`, text: 'Music stopped. Want me to queue something?', priority: 'normal', source: 'spotify' })
-          stoppedCount = 0
+        if (stoppedCount === 2) {
+          const stoppedAlertId = `spotify:stopped:${Date.now()}`
+          enqueue({ id: stoppedAlertId, text: 'Music stopped. Want me to queue something?', priority: 'normal', source: 'spotify' })
         }
-      } else if (state.is_playing) {
+      } else {
         stoppedCount = 0
       }
-
-      prevIsPlaying = state.is_playing
     } catch (err) {
       console.error('[monitor:spotify] error:', err instanceof Error ? err.message : err)
     }
