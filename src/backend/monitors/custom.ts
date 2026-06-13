@@ -50,10 +50,11 @@ export function startCustomMonitor(enqueue: EnqueueFn, register: RegisterFn): vo
 
   const tick = (): void => {
     try {
+      if (!getSettings().monitorCustom) return
       const due = getDueReminders()
       for (const r of due) {
+        enqueue({ id: r.id, text: createRemindAlertText(r.text), priority: 'normal', source: 'custom' })
         markReminderFired(r.id)
-        enqueue({ id: r.id, text: r.text, priority: 'normal', source: 'custom' })
       }
     } catch (err) {
       console.error('[monitor:custom] error:', err)

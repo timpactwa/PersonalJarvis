@@ -50,6 +50,20 @@ describe('parseFireAt', () => {
     expect(d.getMinutes()).toBe(30)
   })
 
+  it('parses "at 12pm" as noon', () => {
+    const result = parseFireAt('at 12pm')
+    const d = new Date(result)
+    expect(d.getHours()).toBe(12)
+    expect(d.getMinutes()).toBe(0)
+  })
+
+  it('parses "at 12am" as midnight', () => {
+    const result = parseFireAt('at 12am')
+    const d = new Date(result)
+    expect(d.getHours()).toBe(0)
+    expect(d.getMinutes()).toBe(0)
+  })
+
   it('throws on unparseable input', () => {
     expect(() => parseFireAt('next tuesday sometime')).toThrow()
   })

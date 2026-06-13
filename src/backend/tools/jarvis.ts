@@ -256,9 +256,13 @@ export function setReminder(input: Record<string, unknown>): string {
 
   const fireAt = parseFireAt(fireAtStr)
   const { id } = createReminder(text, fireAt)
-  const when = new Date(fireAt).toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit', hour12: true })
-  console.error(`[jarvis] reminder set: "${text}" at ${when} (id: ${id})`)
-  return `Got it — I'll remind you at ${when}.`
+  const fireDate = new Date(fireAt)
+  const tomorrow = new Date(); tomorrow.setDate(tomorrow.getDate() + 1)
+  const isTomorrow = fireDate.toDateString() === tomorrow.toDateString()
+  const timeStr = fireDate.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit', hour12: true })
+  const label = isTomorrow ? `tomorrow at ${timeStr}` : `at ${timeStr}`
+  console.error(`[jarvis] reminder set: "${text}" ${label} (id: ${id})`)
+  return `Got it — I'll remind you ${label}.`
 }
 
 export async function handleJarvisTool(name: string, input: Record<string, unknown>): Promise<string> {
