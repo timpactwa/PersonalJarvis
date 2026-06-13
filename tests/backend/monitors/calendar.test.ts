@@ -43,15 +43,26 @@ describe('buildCalendarAlerts', () => {
   })
 
   it('can emit both 30-min and 15-min alerts for same event at different poll times', () => {
-    // Event at 12 min → only 15-min window fires
     const seen = new Set<string>()
-    const alerts1 = buildCalendarAlerts([makeEvent('e5', 'Demo', 12)], seen)
-    expect(alerts1[0].id).toBe('cal:e5:15')
-    seen.add('cal:e5:15')
 
-    // Same event at 28 min (from a previous poll) — 30-min window fires
-    const seen2 = new Set<string>()
-    const alerts2 = buildCalendarAlerts([makeEvent('e5b', 'Demo', 28)], seen2)
-    expect(alerts2[0].id).toBe('cal:e5b:30')
+    // First poll: event is 28 min away → fires 30-min alert
+    const alerts1 = buildCalendarAlerts([makeEvent('e5', 'Demo', 28)], seen)
+    expect(alerts1).toHaveLength(1)
+    expect(alerts1[0].id).toBe('cal:e5:30')
+    alerts1.forEach(a => seen.add(a.id))  // simulate registry adding to seen
+
+    // Second poll: same event is now 12 min away → fires 15-min alert, 30-min suppressed
+    const alerts2 = buildCalendarAlerts([makeEvent('e5', 'Demo', 12)], seen)
+    expect(alerts2).toHaveLength(1)
+    expect(alerts2[0].id).toBe('cal:e5:15')
+    expect(alerts2[0].priority).toBe('urgent')
+  })
+
+  it('emits urgent alert for event starting right now (minsUntil ≈ 0)', () => {
+    const alerts = buildCalendarAlerts([makeEvent('e6', 'Standup', 0)], new Set())
+    expect(alerts).toHaveLength(1)
+    expect(alerts[0].priority).toBe('urgent')
+    expect(alerts[0].text).toContain('right now')
+    expect(alerts[0].id).toBe('cal:e6:15')
   })
 })

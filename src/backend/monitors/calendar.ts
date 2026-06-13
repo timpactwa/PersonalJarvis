@@ -11,22 +11,23 @@ export function buildCalendarAlerts(
   const alerts: Alert[] = []
 
   for (const event of events) {
-    const eventId = event.id ?? 'unknown'
     const title = event.summary ?? 'Untitled event'
     const startMs = Date.parse(event.start.dateTime ?? event.start.date ?? '')
     if (isNaN(startMs)) continue
+    const eventId = event.id ?? `${(event.summary ?? 'noname').replace(/\s+/g, '-').toLowerCase()}-${startMs}`
 
     const minsUntil = Math.round((startMs - now) / 60_000)
 
-    if (minsUntil <= 15 && minsUntil > 0) {
+    if (minsUntil <= 15 && minsUntil >= -2) {
       const alertId = `cal:${eventId}:15`
       if (!seen.has(alertId)) {
+        const timePhrase = minsUntil <= 0 ? 'right now' : `in ${minsUntil} minute${minsUntil === 1 ? '' : 's'}`
         alerts.push({
           id: alertId,
-          text: `You have ${title} in ${minsUntil} minute${minsUntil === 1 ? '' : 's'}.`,
+          text: `You have ${title} ${timePhrase}.`,
           priority: 'urgent',
           source: 'calendar',
-          expiresAt: startMs,
+          expiresAt: startMs + 5 * 60_000,
         })
       }
     } else if (minsUntil <= 30 && minsUntil > 15) {
