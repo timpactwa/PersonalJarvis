@@ -46,6 +46,11 @@ export const jarvisToolDefs: JarvisToolDef[] = [
           type: 'boolean',
           description: 'Enable quiet mode to silence TTS and disable push-to-talk. Useful in quiet spaces.',
         },
+        monitorCalendar: { type: 'boolean', description: 'Enable/disable the calendar monitor (alerts 30/15 min before events).' },
+        monitorEmail:    { type: 'boolean', description: 'Enable/disable the email monitor (new important mail alerts).' },
+        monitorSpotify:  { type: 'boolean', description: 'Enable/disable the Spotify monitor (playback-end and device-switch alerts).' },
+        monitorSystem:   { type: 'boolean', description: 'Enable/disable the system monitor (battery level alerts at 20% and 10%).' },
+        monitorCustom:   { type: 'boolean', description: 'Enable/disable the custom reminders monitor (fires jarvis_remind reminders).' },
       },
       required: [],
     },
@@ -108,6 +113,13 @@ function configuredApis(): string {
 
 function formatSettings(s: Settings): string {
   const active = activeProviderLabel(s)
+  const monitorStates = [
+    s.monitorCalendar ? 'calendar' : null,
+    s.monitorEmail    ? 'email'    : null,
+    s.monitorSpotify  ? 'Spotify'  : null,
+    s.monitorSystem   ? 'battery'  : null,
+    s.monitorCustom   ? 'reminders': null,
+  ].filter(Boolean)
   return [
     `Active provider: ${active} (setting: ${s.llmProvider})`,
     `Claude model preference: ${s.modelPreference}`,
@@ -117,6 +129,7 @@ function formatSettings(s: Settings): string {
     `Ollama model: ${s.ollamaModel} @ ${s.ollamaBaseUrl}`,
     s.userProfile ? `User profile: ${s.userProfile.slice(0, 200)}${s.userProfile.length > 200 ? '…' : ''}` : 'User profile: (empty)',
     `Configured APIs: ${configuredApis()}`,
+    `Background monitors active: ${monitorStates.length > 0 ? monitorStates.join(', ') : 'none'}`,
   ].join('\n')
 }
 
@@ -146,6 +159,11 @@ function validatePartial(input: Record<string, unknown>): Partial<Settings> {
   if (input.ollamaBaseUrl !== undefined) partial.ollamaBaseUrl = String(input.ollamaBaseUrl).trim()
   if (input.userProfile !== undefined) partial.userProfile = String(input.userProfile)
   if (input.quietMode !== undefined) partial.quietMode = Boolean(input.quietMode)
+  if (input.monitorCalendar !== undefined) partial.monitorCalendar = Boolean(input.monitorCalendar)
+  if (input.monitorEmail    !== undefined) partial.monitorEmail    = Boolean(input.monitorEmail)
+  if (input.monitorSpotify  !== undefined) partial.monitorSpotify  = Boolean(input.monitorSpotify)
+  if (input.monitorSystem   !== undefined) partial.monitorSystem   = Boolean(input.monitorSystem)
+  if (input.monitorCustom   !== undefined) partial.monitorCustom   = Boolean(input.monitorCustom)
 
   if (input.shortTurns !== undefined) {
     const n = Number(input.shortTurns)

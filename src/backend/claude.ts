@@ -111,11 +111,20 @@ CAPABILITIES — infer which tool to use from the user's natural language, never
 • Search the web for current info, news, weather, prices, facts → web_search (use proactively — never say you lack real-time access without trying this first)
 • Read the full content of a URL → web_read (use after web_search for deep research)
 • Multi-step research or complex tasks → spawn_agent
-• Read/change Jarvis settings (provider, voice, hotkey, profile) → jarvis_get_settings / jarvis_set_settings
+• Set a timed reminder → jarvis_remind ("remind me in 30 minutes to take a break", "remind me at 5pm to call mom" — time can be ISO, "in N minutes/hours", or "at H:MMam/pm")
+• Read/change Jarvis settings (provider, voice, hotkey, profile, monitor toggles) → jarvis_get_settings / jarvis_set_settings
+• Enable or disable a background monitor → jarvis_set_settings with monitorCalendar / monitorEmail / monitorSpotify / monitorSystem / monitorCustom (boolean) — e.g. "stop watching my email" → monitorEmail: false
 • Usage, spending, token counts, rate limits → jarvis_get_usage (never web_search for your own usage)
 • GitHub — PRs, issues, commits, repo status, write PR descriptions → github_pr_list / github_pr_view / github_issue_list / github_commit_log / github_repo_status / github_pr_describe
 • Spotify — control playback, search, queue; connect account → spotify_auth / spotify_play / spotify_pause / spotify_next / spotify_prev / spotify_volume / spotify_search / spotify_queue / spotify_current; list user's own playlists → spotify_my_playlists. For "play my [X] playlist" use spotify_play with type:"playlist" — it matches against the user's library automatically. Use spotify_my_playlists when user asks what playlists they have.
 • Open Spotify or GitHub visual panel → jarvis_open_panel (use when user says "show", "pull up", "open dashboard", "let me see")
+
+BACKGROUND MONITORING — I watch 5 data sources automatically and speak alerts when the user is not talking. Each can be toggled on/off via settings:
+• Calendar — alerts 30 min (normal) and 15 min (urgent) before events; fires again at start if missed
+• Email — new unread mail, excluding promotions/social; rolls up to a count summary if >3 arrive at once
+• Spotify — speaks when music stops ("Music stopped. Want me to queue something?") or switches to a non-computer device
+• System — battery alerts at 20% (normal) and 10% (urgent) when unplugged; resets when charger connects
+• Reminders — fires reminders set via jarvis_remind at the requested time; use this for "remind me at 5pm"
 
 PERSONAL KNOWLEDGE — the user's context is injected automatically. When the user mentions someone by first name only, that person's details will appear in your context. Use it naturally without announcing it.
 
@@ -171,7 +180,10 @@ let _client: Anthropic | null = null
 function getClient(): Anthropic {
   if (_client) return _client
   if (process.env.CLAUDE_CODE_OAUTH_TOKEN) {
-    _client = new Anthropic({ authToken: process.env.CLAUDE_CODE_OAUTH_TOKEN })
+    _client = new Anthropic({
+      authToken: process.env.CLAUDE_CODE_OAUTH_TOKEN,
+      defaultHeaders: { 'anthropic-beta': 'oauth-2025-04-20' },
+    })
   } else if (process.env.ANTHROPIC_API_KEY) {
     _client = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY })
   } else {
