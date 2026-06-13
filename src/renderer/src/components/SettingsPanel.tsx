@@ -94,6 +94,33 @@ export function SettingsPanel({ open, settings, onClose, onSave, onHotkeyChange,
           Use in libraries or quiet spaces. Text input still works.
         </p>
 
+        <div style={sectionLabel}>MONITORS</div>
+        <p style={{ fontSize: 10, color: 'var(--ov-text-dim)', marginBottom: 12, lineHeight: 1.5 }}>
+          Jarvis will speak these alerts when idle. Toggle off to silence specific monitors.
+        </p>
+        {(
+          [
+            { key: 'monitorCalendar', label: 'CALENDAR (upcoming events)' },
+            { key: 'monitorEmail',    label: 'EMAIL (new important mail)' },
+            { key: 'monitorSpotify',  label: 'SPOTIFY (playback ended)' },
+            { key: 'monitorSystem',   label: 'SYSTEM (battery level)' },
+            { key: 'monitorCustom',   label: 'REMINDERS (say "remind me…")' },
+          ] as const
+        ).map(({ key, label }) => (
+          <label key={key} style={{ display: 'flex', alignItems: 'center', gap: 10, cursor: 'pointer', marginBottom: 10 }}>
+            <input
+              type="checkbox"
+              checked={!!(draft as Record<string, unknown>)[key]}
+              onChange={e => setDraft({ ...draft, [key]: e.target.checked } as any)}
+              style={{ width: 16, height: 16, cursor: 'pointer', accentColor: 'var(--ov-accent)' }}
+            />
+            <span style={{ fontSize: 11, letterSpacing: '0.1em', color: 'var(--ov-text-mid)' }}>
+              {label}
+            </span>
+          </label>
+        ))}
+        <div style={{ marginBottom: 16 }} />
+
         <div style={sectionLabel}>AI MODEL</div>
         <label style={label}>LLM PROVIDER</label>
         <select className="ov-input" style={fieldWrap} value={draft.llmProvider ?? 'auto'} onChange={e => setDraft({ ...draft, llmProvider: e.target.value as Settings['llmProvider'] })}>
