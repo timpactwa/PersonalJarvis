@@ -6,6 +6,8 @@ import { join } from 'path'
 import { createServer } from 'http'
 import { randomUUID } from 'crypto'
 import { emitEvent } from '../events'
+import { resolveContactEmail } from '../memory/contacts'
+import { shouldSuppressComposeUI } from '../toolSession'
 
 const TOKEN_PATH = join(process.cwd(), '.gmail-token.json')
 const CREDS_PATH = join(process.cwd(), '.gmail-credentials.json')
@@ -26,11 +28,22 @@ function getOAuth2Client(): OAuth2Client {
   return new google.auth.OAuth2(client_id, client_secret, 'http://localhost:3456')
 }
 
-async function getAuthorizedClient(): Promise<OAuth2Client> {
+export async function getAuthorizedClient(): Promise<OAuth2Client> {
   const auth = getOAuth2Client()
 
   if (existsSync(TOKEN_PATH)) {
     auth.setCredentials(JSON.parse(readFileSync(TOKEN_PATH, 'utf-8')))
+    // Persist refreshed tokens so subsequent calls don't need to re-fetch
+    auth.on('tokens', (newTokens) => {
+      try {
+        const current = existsSync(TOKEN_PATH)
+          ? JSON.parse(readFileSync(TOKEN_PATH, 'utf-8'))
+          : {}
+        writeFileSync(TOKEN_PATH, JSON.stringify({ ...current, ...newTokens }))
+      } catch (e) {
+        console.error('[gmail] failed to save refreshed tokens:', e)
+      }
+    })
     return auth
   }
 
@@ -137,10 +150,17 @@ export async function createDraft(to: string, subject: string, body: string, cc 
   return `Draft saved for ${to}.`
 }
 
-export async function composeEmail(to: string, subject: string, body: string, cc = '', bcc = ''): Promise<string> {
-  const draft = { id: randomUUID(), to, cc, bcc, subject, body }
+export async function composeEmail(to: string, subject: string, body: string, cc = '', bcc = '', suppressUi = false): Promise<string> {
+  const resolvedTo = resolveContactEmail(to)
+  const draft = { id: randomUUID(), to: resolvedTo, cc, bcc, subject, body }
+
+  if (suppressUi || shouldSuppressComposeUI(resolvedTo, subject, draft.id)) {
+    return `Email to ${resolvedTo} was already handled — the composer is closed. Say "compose an email to ${to}" if you need it again.`
+  }
+
   emitEvent({ type: 'email_compose', draft })
-  return `I've opened a composer for your email to ${to} — review and send when ready.`
+  const label = resolvedTo !== to ? `${to} (${resolvedTo})` : to
+  return `I've opened a composer for your email to ${label} — review and send when ready.`
 }
 
 export async function browseEmails(query: string, maxResults = 5): Promise<string> {
@@ -247,7 +267,7 @@ export const gmailToolDefs = [
     input_schema: {
       type: 'object' as const,
       properties: {
-        to:      { type: 'string', description: 'Recipient email address' },
+        to:      { type: 'string', description: 'Recipient email address or contact name (e.g. "mom") — known contacts are resolved automatically' },
         subject: { type: 'string', description: 'Email subject line' },
         body:    { type: 'string', description: 'Plain-text email body' },
         cc:      { type: 'string', description: 'CC recipients (optional, comma-separated)' },
@@ -302,7 +322,7 @@ export async function handleGmailTool(name: string, input: Record<string, any>):
   switch (name) {
     case 'gmail_search':    return searchEmails(input.query, input.max_results)
     case 'gmail_read':      return readEmail(input.message_id)
-    case 'gmail_compose':   return composeEmail(input.to, input.subject, input.body, input.cc, input.bcc)
+    case 'gmail_compose':   return composeEmail(input.to, input.subject, input.body, input.cc, input.bcc, !!input._suppressUi)
     case 'gmail_browse':    return browseEmails(input.query, input.max_results)
     case 'calendar_list':   return listCalendarEvents(input.max_results)
     case 'calendar_create': return openEventCompose(input.title, input.start, input.end, input.description)
