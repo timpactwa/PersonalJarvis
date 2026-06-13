@@ -19,6 +19,12 @@ export interface Settings {
   spotifyRefreshToken: string
   /** Silence TTS and disable push-to-talk for quiet spaces. */
   quietMode: boolean
+  /** Proactive monitor toggles */
+  monitorCalendar: boolean
+  monitorEmail: boolean
+  monitorSpotify: boolean
+  monitorSystem: boolean
+  monitorCustom: boolean
 }
 
 export interface AgentInfo {
@@ -117,6 +123,7 @@ export type BackendEvent =
   | { type: 'spotify_now_playing'; track?: string; artist?: string; isPlaying: boolean }
   | { type: 'github_data'; tab: 'STATUS' | 'PRs' | 'ISSUES' | 'COMMITS'; rows: GithubRow[] }
   | { type: 'plan_preview'; id: string; steps: string[] }
+  | { type: 'speak_text'; text: string }
 
 // Events sent from renderer → backend
 export type RendererEvent =
@@ -140,3 +147,4 @@ export type RendererEvent =
   | { type: 'image_attach'; imageBase64: string; mimeType: string }
   | { type: 'plan_confirmed'; id: string }
   | { type: 'plan_cancelled'; id: string }
+  | { type: 'spotify_refresh' }

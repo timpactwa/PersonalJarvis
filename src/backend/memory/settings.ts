@@ -15,6 +15,11 @@ const DEFAULTS: Settings = {
   spotifyExpiresAt: 0,
   spotifyRefreshToken: '',
   quietMode: false,
+  monitorCalendar: true,
+  monitorEmail: true,
+  monitorSpotify: true,
+  monitorSystem: true,
+  monitorCustom: true,
 }
 
 export function getSettings(): Settings {
@@ -50,6 +55,11 @@ export function getSettings(): Settings {
     spotifyExpiresAt: map.has('spotifyExpiresAt') ? Number(map.get('spotifyExpiresAt')) : DEFAULTS.spotifyExpiresAt,
     spotifyRefreshToken: map.get('spotifyRefreshToken') ?? DEFAULTS.spotifyRefreshToken,
     quietMode: map.has('quietMode') ? map.get('quietMode') === 'true' : DEFAULTS.quietMode,
+    monitorCalendar: map.has('monitorCalendar') ? map.get('monitorCalendar') === 'true' : DEFAULTS.monitorCalendar,
+    monitorEmail:    map.has('monitorEmail')    ? map.get('monitorEmail')    === 'true' : DEFAULTS.monitorEmail,
+    monitorSpotify:  map.has('monitorSpotify')  ? map.get('monitorSpotify')  === 'true' : DEFAULTS.monitorSpotify,
+    monitorSystem:   map.has('monitorSystem')   ? map.get('monitorSystem')   === 'true' : DEFAULTS.monitorSystem,
+    monitorCustom:   map.has('monitorCustom')   ? map.get('monitorCustom')   === 'true' : DEFAULTS.monitorCustom,
   }
 }
 

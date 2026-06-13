@@ -61,6 +61,7 @@ export function initDb(): void {
         type TEXT NOT NULL DEFAULT 'person',
         relationship TEXT NOT NULL DEFAULT '',
         context TEXT NOT NULL DEFAULT '',
+        email TEXT NOT NULL DEFAULT '',
         updated_at INTEGER NOT NULL
       );
 
@@ -73,7 +74,27 @@ export function initDb(): void {
       );
       CREATE INDEX IF NOT EXISTS idx_user_events_ts ON user_events(ts);
       CREATE INDEX IF NOT EXISTS idx_user_events_type ON user_events(event_type);
+
+      CREATE TABLE IF NOT EXISTS custom_commands (
+        id TEXT PRIMARY KEY,
+        label TEXT NOT NULL,
+        aliases TEXT NOT NULL DEFAULT '[]',
+        target TEXT NOT NULL,
+        kind TEXT NOT NULL DEFAULT 'exe',
+        updated_at INTEGER NOT NULL
+      );
+
+      CREATE TABLE IF NOT EXISTS reminders (
+        id TEXT PRIMARY KEY,
+        text TEXT NOT NULL,
+        fire_at INTEGER NOT NULL,
+        fired INTEGER DEFAULT 0
+      );
     `)
+    try {
+      db.exec(`ALTER TABLE entities ADD COLUMN email TEXT NOT NULL DEFAULT ''`)
+    } catch { /* column already exists */ }
+
     dbAvailable = true
     dbError = null
     console.error('[db] SQLite ready at', DB_PATH)
@@ -204,7 +225,16 @@ export interface Entity {
   type: 'person' | 'place' | 'project' | 'org'
   relationship: string
   context: string
+  email: string
   updatedAt: number
+}
+
+function relationshipAliases(relationship: string): string[] {
+  const lower = relationship.toLowerCase()
+  const aliases: string[] = []
+  if (lower.includes('mother') || lower.includes('mom')) aliases.push('mom', 'mother')
+  if (lower.includes('father') || lower.includes('dad')) aliases.push('dad', 'father')
+  return aliases
 }
 
 export function upsertEntity(
@@ -213,27 +243,73 @@ export function upsertEntity(
   relationship: string,
   context: string,
   aliases: string[] = [],
+  email = '',
 ): void {
   if (!dbAvailable) return
   const existing = getDb().prepare(
-    `SELECT id FROM entities WHERE name = ? COLLATE NOCASE`
-  ).get(name) as { id: number } | undefined
+    `SELECT * FROM entities WHERE name = ? COLLATE NOCASE`
+  ).get(name) as {
+    id: number
+    relationship: string
+    context: string
+    email: string
+    aliases: string
+  } | undefined
+
+  const relAliases = relationshipAliases(relationship)
+  const mergedAliases = [...new Set([
+    ...aliases,
+    ...relAliases,
+    ...(existing ? JSON.parse(existing.aliases ?? '[]') as string[] : []),
+  ])]
 
   if (existing) {
+    const mergedRelationship = relationship.trim() || existing.relationship
+    const mergedEmail = email.trim() || existing.email || ''
+    const mergedContext = mergeEntityContext(existing.context, context)
     getDb().prepare(
-      `UPDATE entities SET type=?, relationship=?, context=?, aliases=?, updated_at=? WHERE id=?`
-    ).run(type, relationship, context, JSON.stringify(aliases), Date.now(), existing.id)
+      `UPDATE entities SET type=?, relationship=?, context=?, email=?, aliases=?, updated_at=? WHERE id=?`
+    ).run(type, mergedRelationship, mergedContext, mergedEmail, JSON.stringify(mergedAliases), Date.now(), existing.id)
   } else {
     getDb().prepare(
-      `INSERT INTO entities (name, type, relationship, context, aliases, updated_at) VALUES (?,?,?,?,?,?)`
-    ).run(name, type, relationship, context, JSON.stringify(aliases), Date.now())
+      `INSERT INTO entities (name, type, relationship, context, email, aliases, updated_at) VALUES (?,?,?,?,?,?,?)`
+    ).run(name, type, relationship, context, email.trim(), JSON.stringify(mergedAliases), Date.now())
   }
+}
+
+function mergeEntityContext(oldCtx: string, newCtx: string): string {
+  const o = oldCtx.trim()
+  const n = newCtx.trim()
+  if (!n) return o
+  if (!o) return n
+  const vague = /^(email recipient|mom'?s email|dad'?s email|email|email address)$/i
+  if (vague.test(n) && !vague.test(o)) return o
+  if (o.includes(n)) return o
+  if (n.includes(o)) return n
+  return `${o}; ${n}`
+}
+
+export function findEntityByContactRef(ref: string): Entity | null {
+  const needle = ref.trim().toLowerCase()
+  if (!needle) return null
+  const all = getAllEntities()
+  return all.find(entity => {
+    if (entity.name.toLowerCase() === needle) return true
+    if ((entity.aliases as string[]).some(a => a.toLowerCase() === needle)) return true
+    if (entity.relationship.toLowerCase().includes(needle)) return true
+    return relationshipAliases(entity.relationship).some(a => a === needle)
+  }) ?? null
 }
 
 export function getAllEntities(): Entity[] {
   if (!dbAvailable) return []
   const rows = getDb().prepare('SELECT * FROM entities ORDER BY updated_at DESC').all() as any[]
-  return rows.map(r => ({ ...r, aliases: JSON.parse(r.aliases ?? '[]'), updatedAt: r.updated_at }))
+  return rows.map(r => ({
+    ...r,
+    email: r.email ?? '',
+    aliases: JSON.parse(r.aliases ?? '[]'),
+    updatedAt: r.updated_at,
+  }))
 }
 
 export function findMentionedEntities(text: string): Entity[] {
@@ -241,7 +317,10 @@ export function findMentionedEntities(text: string): Entity[] {
   const lower = text.toLowerCase()
   return all.filter(e => {
     if (lower.includes(e.name.toLowerCase())) return true
-    return (e.aliases as string[]).some((a: string) => lower.includes(a.toLowerCase()))
+    if ((e.aliases as string[]).some((a: string) => lower.includes(a.toLowerCase()))) return true
+    const rel = e.relationship.toLowerCase()
+    if (rel && lower.includes(rel)) return true
+    return relationshipAliases(e.relationship).some(a => lower.includes(a))
   })
 }
 
@@ -268,4 +347,34 @@ export function getAllMemories(): Array<{ id: number; text: string; timestamp: n
 export function deleteMemory(id: number): void {
   if (!dbAvailable) return
   getDb().prepare('DELETE FROM memories WHERE id = ?').run(id)
+}
+
+// ── Reminders ────────────────────────────────────────────────────────────────
+
+export interface Reminder {
+  id: string
+  text: string
+  fireAt: number
+  fired: boolean
+}
+
+export function insertReminder(id: string, text: string, fireAt: number): void {
+  if (!dbAvailable) return
+  getDb().prepare(
+    'INSERT INTO reminders (id, text, fire_at, fired) VALUES (?, ?, ?, 0)',
+  ).run(id, text, fireAt)
+}
+
+export function getDueReminders(): Reminder[] {
+  if (!dbAvailable) return []
+  const now = Date.now()
+  return (getDb().prepare(
+    'SELECT id, text, fire_at as fireAt, fired FROM reminders WHERE fired = 0 AND fire_at <= ?',
+  ).all(now) as Array<{ id: string; text: string; fireAt: number; fired: number }>)
+    .map(r => ({ ...r, fired: r.fired === 1 }))
+}
+
+export function markReminderFired(id: string): void {
+  if (!dbAvailable) return
+  getDb().prepare('UPDATE reminders SET fired = 1 WHERE id = ?').run(id)
 }
