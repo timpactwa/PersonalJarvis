@@ -87,9 +87,13 @@ function claudeWithGroqFallback(
   return chatClaude(userText, history, memories, broadcast, undefined, undefined, forceModel).catch((err: unknown) => {
     const msg = err instanceof Error ? err.message : String(err)
     const rateLimited = msg.includes('429') || msg.includes('rate_limit') || msg.includes('usage')
-    if (rateLimited && process.env.GROQ_API_KEY) {
-      console.error('[pipeline] Claude unavailable — falling back to Groq')
-      return chatGroq(userText, history, memories, broadcast)
+    if (rateLimited) {
+      if (process.env.GROQ_API_KEY) {
+        console.error('[pipeline] Claude rate limited — falling back to Groq')
+        return chatGroq(userText, history, memories, broadcast)
+      }
+      console.error('[pipeline] Claude rate limited — falling back to Ollama')
+      return chatOllama(userText, history, memories, broadcast)
     }
     throw err
   })
@@ -149,6 +153,8 @@ function chat(
   return chatOllama(userText, history, memories, broadcast)
 }
 import { synthesize } from './elevenlabs'
+import { synthesizeEdge } from './edgeTts'
+import { handleSpotifyTool } from './tools/spotify'
 import { initDb, closeDb, isDbAvailable, getDbError, getUsageDaily, getUsageByModel, getAllMemories, insertMemory, deleteMemory } from './memory/db'
 import { logApiCall, getStatsToday } from './memory/logger'
 import { embed, findTopK } from './memory/embeddings'
@@ -168,6 +174,12 @@ import { closeAgent } from './agents'
 import { resolvePlanPreview } from './planPreview'
 import { getSettings, setSettings } from './memory/settings'
 import { upsertCustomCommand, deleteCustomCommand } from './memory/customCommands'
+import { monitors } from './monitors/index'
+import { startCalendarMonitor } from './monitors/calendar'
+import { startEmailMonitor } from './monitors/email'
+import { startSpotifyMonitor } from './monitors/spotify'
+import { startSystemMonitor } from './monitors/system'
+import { startCustomMonitor } from './monitors/custom'
 import {
   initCapture,
   startCapture,
@@ -181,6 +193,16 @@ import {
 
 // Initialize database
 initDb()
+
+// Register background monitors (started on first WebSocket connection).
+// speakFn is wrapped in an arrow so it's a lazy reference to speakOrIdle,
+// which is declared later in this file.
+monitors.addMonitor(startCalendarMonitor)
+monitors.addMonitor(startEmailMonitor)
+monitors.addMonitor(startSpotifyMonitor)
+monitors.addMonitor(startSystemMonitor)
+monitors.addMonitor(startCustomMonitor)
+monitors.setSpeakFn((text) => speakOrIdle(text))
 
 // Warm the mic stream now so the first push-to-talk is instant (device scan +
 // dshow open used to cost 1-2s on the first M press).
@@ -308,6 +330,11 @@ wss.on('connection', (ws: WebSocket) => {
   })
 
   broadcast({ type: 'state', state: 'idle' })
+
+  if (!monitors.isRunning()) {
+    monitors.startAll()
+    console.error('[monitors] background monitors started')
+  }
 
   try {
     const stats = getStatsToday()
@@ -486,6 +513,13 @@ function handleRendererEvent(event: RendererEvent): void {
     resolvePlanPreview(event.id, false)
     return
   }
+  if (event.type === 'spotify_refresh') {
+    // Direct Spotify state poll — bypasses the LLM entirely for low-latency panel updates
+    void handleSpotifyTool('spotify_current', {}).catch(err => {
+      console.error('[spotify] refresh error:', err instanceof Error ? err.message : String(err))
+    })
+    return
+  }
   eventHandlers.forEach(h => h(event))
 }
 
@@ -513,6 +547,7 @@ async function processAudio(pcmBuffer: Buffer, source: string): Promise<void> {
     return
   }
   isProcessing = true
+  monitors.setIdle(false)
 
   console.error(
     '[pipeline] received audio:', pcmBuffer.length, 'bytes',
@@ -534,12 +569,22 @@ async function processAudio(pcmBuffer: Buffer, source: string): Promise<void> {
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err)
     console.error('[pipeline] error processing audio:', msg)
-    broadcast({ type: 'error', message: msg })
+    broadcast({ type: 'error', message: friendlyError(err) })
     broadcast({ type: 'state', state: 'idle' })
   } finally {
     isProcessing = false
+    monitors.setIdle(true)
     drainPending()
   }
+}
+
+function friendlyError(err: unknown): string {
+  const raw = err instanceof Error ? err.message : String(err)
+  if (raw.includes('rate_limit') || raw.includes('429')) return 'Claude is rate limited right now. Try again in a moment.'
+  try {
+    const parsed = JSON.parse(raw.replace(/^\d+\s*/, ''))
+    return parsed?.error?.message || parsed?.message || raw
+  } catch { return raw }
 }
 
 const TEXT_TOGGLE_RE = /\b(toggle|turn on|turn off|enable|disable|show|hide)\b.{0,20}\btext\b|\btext\b.{0,20}\b(toggle|on|off|show|hide)\b/i
@@ -562,6 +607,7 @@ async function processUserText(userText: string, source: string): Promise<void> 
   }
 
   isProcessing = true
+  monitors.setIdle(false)
 
   console.log(`[pipeline] user (${source}): "${userText}"`)
   broadcast({ type: 'state', state: 'thinking' })
@@ -571,32 +617,34 @@ async function processUserText(userText: string, source: string): Promise<void> 
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err)
     console.error('[pipeline] error processing text:', msg)
-    broadcast({ type: 'error', message: msg })
+    broadcast({ type: 'error', message: friendlyError(err) })
     broadcast({ type: 'state', state: 'idle' })
   } finally {
     isProcessing = false
+    monitors.setIdle(true)
     drainPending()
   }
 }
 
-// Speak `text` if TTS is configured, otherwise go idle immediately. The
-// renderer drives the speaking→idle transition around actual audio playback,
-// so no fixed timers — those kept the UI locked for seconds after every reply.
+// TTS priority: Edge TTS → Web Speech API (last resort, no internet needed).
 async function speakOrIdle(text: string): Promise<void> {
   const { quietMode } = getSettings()
-  if (quietMode || !process.env.ELEVENLABS_API_KEY || process.env.ELEVENLABS_API_KEY === 'your_key_from_elevenlabs') {
+  if (quietMode) {
     broadcast({ type: 'state', state: 'idle' })
     return
   }
+
   try {
-    const audioBuffer = await synthesize(text)
+    const audioBuffer = await synthesizeEdge(text)
     broadcast({ type: 'audio', data: audioBuffer })
+    return
   } catch (err) {
-    const ttsMsg = err instanceof Error ? err.message : String(err)
-    console.error('[tts] error:', ttsMsg)
-    broadcast({ type: 'error', message: `TTS failed: ${ttsMsg}` })
-    broadcast({ type: 'state', state: 'idle' })
+    console.error('[tts] Edge TTS failed, falling back to Web Speech:', err instanceof Error ? err.message : err)
   }
+
+  // Web Speech API fallback — renderer plays via speechSynthesis (no network needed)
+  broadcast({ type: 'state', state: 'speaking' })
+  broadcast({ type: 'speak_text', text })
 }
 
 async function runConversation(userText: string): Promise<void> {
@@ -797,6 +845,7 @@ async function handlePttStop(): Promise<void> {
 // close the db cleanly, and exit. Triggered by the main process on app quit.
 function shutdown(): void {
   console.error('[backend] shutdown requested — cleaning up')
+  monitors.stopAll()
   shutdownCapture()
   try { closeDb() } catch { /* best effort */ }
   server.close()
