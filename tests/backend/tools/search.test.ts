@@ -38,7 +38,7 @@ describe('webSearch', () => {
   })
 
   it('returns formatted numbered results on success', async () => {
-    process.env.BRAVE_SEARCH_API_KEY = 'test-key'
+    process.env.BRAVE_SEARCH_API_KEY = 'B'.repeat(32)
     vi.stubGlobal('fetch', vi.fn(async () => ({
       ok: true,
       json: async () => ({
@@ -59,7 +59,7 @@ describe('webSearch', () => {
   })
 
   it('returns "No results found" when results array is empty', async () => {
-    process.env.BRAVE_SEARCH_API_KEY = 'test-key'
+    process.env.BRAVE_SEARCH_API_KEY = 'B'.repeat(32)
     vi.stubGlobal('fetch', vi.fn(async () => ({
       ok: true,
       json: async () => ({ web: { results: [] } }),
@@ -69,7 +69,7 @@ describe('webSearch', () => {
   })
 
   it('returns "No results found" when web field is absent', async () => {
-    process.env.BRAVE_SEARCH_API_KEY = 'test-key'
+    process.env.BRAVE_SEARCH_API_KEY = 'B'.repeat(32)
     vi.stubGlobal('fetch', vi.fn(async () => ({
       ok: true,
       json: async () => ({}),
@@ -79,7 +79,7 @@ describe('webSearch', () => {
   })
 
   it('throws on API error response', async () => {
-    process.env.BRAVE_SEARCH_API_KEY = 'test-key'
+    process.env.BRAVE_SEARCH_API_KEY = 'B'.repeat(32)
     vi.stubGlobal('fetch', vi.fn(async () => ({
       ok: false, status: 401, text: async () => 'Unauthorized',
     })))
@@ -88,7 +88,7 @@ describe('webSearch', () => {
   })
 
   it('clamps count to a maximum of 10', async () => {
-    process.env.BRAVE_SEARCH_API_KEY = 'test-key'
+    process.env.BRAVE_SEARCH_API_KEY = 'B'.repeat(32)
     let capturedUrl = ''
     vi.stubGlobal('fetch', vi.fn(async (url: string) => {
       capturedUrl = url
@@ -100,7 +100,7 @@ describe('webSearch', () => {
   })
 
   it('clamps count to a minimum of 1', async () => {
-    process.env.BRAVE_SEARCH_API_KEY = 'test-key'
+    process.env.BRAVE_SEARCH_API_KEY = 'B'.repeat(32)
     let capturedUrl = ''
     vi.stubGlobal('fetch', vi.fn(async (url: string) => {
       capturedUrl = url
@@ -112,7 +112,7 @@ describe('webSearch', () => {
   })
 
   it('URL-encodes the query parameter', async () => {
-    process.env.BRAVE_SEARCH_API_KEY = 'test-key'
+    process.env.BRAVE_SEARCH_API_KEY = 'B'.repeat(32)
     let capturedUrl = ''
     vi.stubGlobal('fetch', vi.fn(async (url: string) => {
       capturedUrl = url
@@ -213,7 +213,7 @@ describe('webRead', () => {
 
 describe('handleSearchTool', () => {
   it('dispatches web_search to webSearch', async () => {
-    process.env.BRAVE_SEARCH_API_KEY = 'test-key'
+    process.env.BRAVE_SEARCH_API_KEY = 'B'.repeat(32)
     vi.stubGlobal('fetch', vi.fn(async () => ({
       ok: true,
       json: async () => ({
