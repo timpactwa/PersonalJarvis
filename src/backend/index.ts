@@ -47,6 +47,18 @@ const TOOL_KEYWORDS_ROUTE = [
   'email', 'gmail', 'calendar', 'file', 'folder', 'search', 'send', 'find',
   'launch', 'read', 'write', 'spotify', 'chrome', 'discord', 'vscode', 'rivals',
   'code', 'terminal', 'powershell', 'download', 'upload', 'run', 'execute',
+  // app / launch intents
+  'open', 'start',
+  // calendar / scheduling
+  'event', 'meeting', 'schedule', 'appointment',
+  // music playback control
+  'play', 'pause', 'resume', 'skip', 'song', 'track', 'playlist', 'volume', 'queue', 'music',
+  // reminders
+  'remind', 'reminder',
+  // github / source control
+  'github', 'pull request', 'issue', 'commit', 'repo', 'branch',
+  // screen / vision
+  'screenshot',
   // web search triggers
   'web', 'internet', 'weather', 'news', 'research', 'google',
   // self-configuration / usage
@@ -171,6 +183,7 @@ import {
 import { stripResponseTags } from './responseTags'
 import { markComposeCompleted, markComposeDismissed, clearComposeSuppression } from './toolSession'
 import { closeAgent } from './agents'
+import { runImprovementAgent } from './improvement'
 import { resolvePlanPreview } from './planPreview'
 import { getSettings, setSettings } from './memory/settings'
 import { upsertCustomCommand, deleteCustomCommand } from './memory/customCommands'
@@ -220,6 +233,9 @@ let isProcessing = false
 // Image attached by the user (drag-drop or screenshot hotkey) — consumed by
 // the next conversation turn, which is forced onto Claude for vision.
 let pendingImage: { imageBase64: string; mimeType: string } | null = null
+
+// Resolves the next PTT input to the improvement agent instead of the LLM pipeline
+let pendingImprovementResolve: ((answer: string) => void) | null = null
 
 export function broadcast(event: BackendEvent): void {
   if (!_activeWs || _activeWs.readyState !== WebSocket.OPEN) return
@@ -354,6 +370,10 @@ function handleRendererEvent(event: RendererEvent): void {
     return
   }
   if (event.type === 'command' && event.text === '__ptt_start') {
+    return
+  }
+  if (event.type === 'speech_done') {
+    monitors.setIdle(true)
     return
   }
   if (event.type === 'command' && event.text && !event.text.startsWith('__')) {
@@ -520,6 +540,15 @@ function handleRendererEvent(event: RendererEvent): void {
     })
     return
   }
+  if (event.type === 'capability_add') {
+    const portAddr = server.address() as { port: number } | null
+    const port = portAddr?.port ?? 0
+    void runImprovementAgent(event.prompt, port).catch(err => {
+      console.error('[improvement] unhandled error:', err)
+      broadcast({ type: 'improvement_error', message: String(err) })
+    })
+    return
+  }
   eventHandlers.forEach(h => h(event))
 }
 
@@ -573,7 +602,6 @@ async function processAudio(pcmBuffer: Buffer, source: string): Promise<void> {
     broadcast({ type: 'state', state: 'idle' })
   } finally {
     isProcessing = false
-    monitors.setIdle(true)
     drainPending()
   }
 }
@@ -621,9 +649,22 @@ async function processUserText(userText: string, source: string): Promise<void> 
     broadcast({ type: 'state', state: 'idle' })
   } finally {
     isProcessing = false
-    monitors.setIdle(true)
     drainPending()
   }
+}
+
+function stripMarkdownForTts(text: string): string {
+  return text
+    .replace(/\*\*\*(.*?)\*\*\*/gs, '$1')
+    .replace(/\*\*(.*?)\*\*/gs, '$1')
+    .replace(/__(.*?)__/gs, '$1')
+    .replace(/\*(.*?)\*/gs, '$1')
+    .replace(/_(.*?)_/gs, '$1')
+    .replace(/`([^`\n]+)`/g, '$1')
+    .replace(/^#{1,6}\s+/gm, '')
+    .replace(/\n{2,}/g, '. ')
+    .replace(/\n/g, ' ')
+    .trim()
 }
 
 // TTS priority: Edge TTS → Web Speech API (last resort, no internet needed).
@@ -631,12 +672,17 @@ async function speakOrIdle(text: string): Promise<void> {
   const { quietMode } = getSettings()
   if (quietMode) {
     broadcast({ type: 'state', state: 'idle' })
+    monitors.setIdle(true)   // no audio will play — re-enable monitor drain immediately
     return
   }
 
+  const speakText = stripMarkdownForTts(text)
+
   try {
-    const audioBuffer = await synthesizeEdge(text)
+    const audioBuffer = await synthesizeEdge(speakText)
+    if (audioBuffer.length === 0) throw new Error('Edge TTS returned empty audio')
     broadcast({ type: 'audio', data: audioBuffer })
+    // Do NOT call monitors.setIdle(true) here — wait for speech_done from renderer
     return
   } catch (err) {
     console.error('[tts] Edge TTS failed, falling back to Web Speech:', err instanceof Error ? err.message : err)
@@ -644,11 +690,20 @@ async function speakOrIdle(text: string): Promise<void> {
 
   // Web Speech API fallback — renderer plays via speechSynthesis (no network needed)
   broadcast({ type: 'state', state: 'speaking' })
-  broadcast({ type: 'speak_text', text })
+  broadcast({ type: 'speak_text', text: speakText })
+  // Do NOT call monitors.setIdle(true) here — wait for speech_done from renderer
 }
 
 async function runConversation(userText: string): Promise<void> {
   broadcast({ type: 'transcript', role: 'user', text: userText, partial: false })
+
+  // If improvement agent is waiting for user input, route this turn to it
+  if (pendingImprovementResolve) {
+    const resolve = pendingImprovementResolve
+    pendingImprovementResolve = null
+    resolve(userText)
+    return
+  }
 
   if (hasPending()) {
     const yes = /\b(yes|yeah|yep|confirm|confirmed|send it|do it|go ahead|affirmative|proceed)\b/i.test(userText)
@@ -694,6 +749,8 @@ async function runConversation(userText: string): Promise<void> {
     return
   }
 
+  // Start embedding early — runs while sync DB calls complete
+  const embedPromise = embed(userText)
   let topMems: string[] = []
   try {
     // Time context — always-current so the LLM knows when it is
@@ -732,7 +789,7 @@ async function runConversation(userText: string): Promise<void> {
       topMems.push(formatEntityContext(entity))
     }
     // Semantic memory retrieval
-    const queryVec = await embed(userText)
+    const queryVec = await embedPromise
     const allMems = getAllMemories()
     if (allMems.length > 0) {
       const semanticMems = findTopK(queryVec, allMems, 3).map(m => m.text)
@@ -864,6 +921,44 @@ if (process.parentPort) {
 } else {
   console.error('[backend] WARNING: no parentPort — PTT capture disabled (standalone mode)')
 }
+
+// HTTP route for improvement agent to ask user questions mid-execution
+server.on('request', (req, res) => {
+  if (req.method === 'POST' && req.url === '/api/improvement/ask') {
+    let body = ''
+    req.on('data', (chunk: Buffer) => { body += chunk.toString() })
+    req.on('end', async () => {
+      try {
+        const { question } = JSON.parse(body) as { question: string }
+        console.log('[improvement] agent question:', question)
+
+        // Speak the question via TTS
+        broadcast({ type: 'transcript', role: 'assistant', text: `[Agent asks] ${question}`, partial: false })
+        try {
+          const audio = await synthesizeEdge(question)
+          broadcast({ type: 'audio', data: audio })
+        } catch { /* TTS failure is non-critical */ }
+
+        // Wait for next PTT response (5 min timeout)
+        const answer = await new Promise<string>((resolve) => {
+          pendingImprovementResolve = resolve
+          setTimeout(() => {
+            if (pendingImprovementResolve === resolve) {
+              pendingImprovementResolve = null
+              resolve('(no response)')
+            }
+          }, 5 * 60 * 1000)
+        })
+
+        res.writeHead(200, { 'Content-Type': 'text/plain' })
+        res.end(answer)
+      } catch (err) {
+        res.writeHead(500)
+        res.end('Error: ' + String(err))
+      }
+    })
+  }
+})
 
 server.listen(PORT, '127.0.0.1', () => {
   const addr = server.address() as { port: number }

@@ -24,16 +24,19 @@ import { SpotifyPanel } from './components/SpotifyPanel'
 import { GitHubPanel } from './components/GitHubPanel'
 import { ImageAttachZone } from './components/ImageAttachZone'
 import PlanPreviewCard from './components/PlanPreviewCard'
+import { CapabilityModal } from './components/CapabilityModal'
+import { RelaunchPrompt } from './components/RelaunchPrompt'
 import type { BackendEvent, EmailDraft } from '../../backend/types'
 import './styles/global.css'
 
 export default function App(): JSX.Element {
-  const { state, handleEvent, toggleDashboard, toggleSettings, clearError, closeCompose, closeViewer, openCompose, closeEvent, toggleTextVisible, toggleMemories, dismissToast, closeCommand, clearReport, setImageAttached, toggleSpotify, toggleGithub, closePlanPreview } = useAnimState()
+  const { state, handleEvent, toggleDashboard, toggleSettings, clearError, closeCompose, closeViewer, openCompose, closeEvent, toggleTextVisible, toggleMemories, dismissToast, closeCommand, clearReport, setImageAttached, toggleSpotify, toggleGithub, closePlanPreview, closeCapabilityModal, dismissImprovementDone } = useAnimState()
 
   const quietModeRef = useRef(false)
   quietModeRef.current = state.quietMode
 
   const activeAudioRef = useRef<HTMLAudioElement | null>(null)
+  const sendRef = useRef<((e: import('../../backend/types').RendererEvent) => void) | null>(null)
 
   const onEvent = useCallback((event: BackendEvent) => {
     if (event.type === 'screenshot_request') {
@@ -62,8 +65,14 @@ export default function App(): JSX.Element {
       }
       const utterance = new SpeechSynthesisUtterance(event.text)
       utterance.rate = 1.1
-      utterance.onend = () => handleEvent({ type: 'state', state: 'idle' })
-      utterance.onerror = () => handleEvent({ type: 'state', state: 'idle' })
+      utterance.onend = () => {
+        handleEvent({ type: 'state', state: 'idle' })
+        sendRef.current?.({ type: 'speech_done' })
+      }
+      utterance.onerror = () => {
+        handleEvent({ type: 'state', state: 'idle' })
+        sendRef.current?.({ type: 'speech_done' })
+      }
       window.speechSynthesis.speak(utterance)
       return
     }
@@ -112,6 +121,7 @@ export default function App(): JSX.Element {
         cleanup()
         activeAudioRef.current = null
         handleEvent({ type: 'state', state: 'idle' })
+        sendRef.current?.({ type: 'speech_done' })
       }
       const doPlay = async (): Promise<void> => {
         if (ctx?.state === 'suspended') await ctx.resume()
@@ -123,11 +133,13 @@ export default function App(): JSX.Element {
         console.error('[audio] playback error:', detail)
         cleanup()
         handleEvent({ type: 'state', state: 'idle' })
+        sendRef.current?.({ type: 'speech_done' })
       })
     }
   }, [handleEvent])
 
   const { send, connected } = useWebSocket(onEvent)
+  sendRef.current = send
 
   // Backend lifecycle status from the main process — lets the UI distinguish
   // "still starting" from "crashed/failed" instead of spinning forever.
@@ -175,8 +187,10 @@ export default function App(): JSX.Element {
         activeAudioRef.current.pause()
         activeAudioRef.current.currentTime = 0
         activeAudioRef.current = null
+        sendRef.current?.({ type: 'speech_done' })
       }
       window.speechSynthesis.cancel()
+      sendRef.current?.({ type: 'speech_done' })
       void startMeter()
     })
     ;(window as any).jarvis.onPttStop(() => { stopMeter() })
@@ -228,6 +242,11 @@ export default function App(): JSX.Element {
     }
     reader.readAsDataURL(file)
   }, [send, setImageAttached])
+
+  const sendCapabilityAdd = useCallback((prompt: string, context: string) => {
+    send({ type: 'capability_add', prompt, context })
+    closeCapabilityModal()
+  }, [send, closeCapabilityModal])
 
   const handlePlanConfirm = (id: string): void => {
     send({ type: 'plan_confirmed', id })
@@ -317,6 +336,17 @@ export default function App(): JSX.Element {
           onConfirm={handlePlanConfirm}
           onCancel={handlePlanCancel}
         />
+      )}
+      {state.capabilityMissing && (
+        <CapabilityModal
+          name={state.capabilityMissing.name}
+          description={state.capabilityMissing.description}
+          onSubmit={sendCapabilityAdd}
+          onClose={closeCapabilityModal}
+        />
+      )}
+      {state.improvementDone && (
+        <RelaunchPrompt onLater={dismissImprovementDone} />
       )}
       {state.compose && (
         <EmailComposer
