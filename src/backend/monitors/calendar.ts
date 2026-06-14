@@ -4,13 +4,14 @@ import { getSettings } from '../memory/settings'
 import type { Alert, EnqueueFn, RegisterFn } from './index'
 
 export function buildCalendarAlerts(
-  events: Array<{ id?: string | null; summary?: string | null; start: { dateTime?: string | null; date?: string | null } }>,
+  events: Array<{ id?: string | null; summary?: string | null; start?: { dateTime?: string | null; date?: string | null } | null }>,
   seen: Set<string>,
 ): Alert[] {
   const now = Date.now()
   const alerts: Alert[] = []
 
   for (const event of events) {
+    if (!event.start) continue
     const title = event.summary ?? 'Untitled event'
     const startMs = Date.parse(event.start.dateTime ?? event.start.date ?? '')
     if (isNaN(startMs)) continue

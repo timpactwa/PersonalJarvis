@@ -57,6 +57,15 @@ function mockFetchSequence(responses: Array<{
   }))
 }
 
+// playHandler calls ensureDevice() → getActiveDeviceId() before issuing /play,
+// which fetches /me/player/devices. An already-active Computer device short-
+// circuits any transfer, so this is a single extra fetch the play tests must mock.
+const ACTIVE_DEVICE_RESPONSE = {
+  ok: true,
+  status: 200,
+  json: async () => ({ devices: [{ id: 'dev-pc', is_active: true, name: 'Desktop', type: 'Computer' }] }),
+}
+
 // ─── spotify_current ─────────────────────────────────────────────────────────
 
 describe('spotify_current', () => {
@@ -273,7 +282,7 @@ describe('spotify_search', () => {
 // ─── spotify_play ─────────────────────────────────────────────────────────────
 
 describe('spotify_play', () => {
-  it('searches and plays by query (2 fetch calls)', async () => {
+  it('searches and plays by query (3 fetch calls)', async () => {
     mockFetchSequence([
       // First call: search
       {
@@ -287,21 +296,26 @@ describe('spotify_play', () => {
           },
         }),
       },
-      // Second call: play
+      // Second call: device check
+      ACTIVE_DEVICE_RESPONSE,
+      // Third call: play
       { ok: true, status: 204 },
     ])
 
     const result = await handleSpotifyTool('spotify_play', { query: 'Song Name' })
     expect(result).toContain('Song Name')
-    expect(vi.mocked(fetch)).toHaveBeenCalledTimes(2)
+    expect(vi.mocked(fetch)).toHaveBeenCalledTimes(3)
   })
 
-  it('resumes with no query (1 fetch call)', async () => {
-    mockFetch({ ok: true, status: 204 })
+  it('resumes with no query (device check + resume = 2 fetch calls)', async () => {
+    mockFetchSequence([
+      ACTIVE_DEVICE_RESPONSE,
+      { ok: true, status: 204 },
+    ])
 
     const result = await handleSpotifyTool('spotify_play', {})
     expect(result).toBe('Playback resumed.')
-    expect(vi.mocked(fetch)).toHaveBeenCalledTimes(1)
+    expect(vi.mocked(fetch)).toHaveBeenCalledTimes(2)
   })
 
   it('returns "No track found" when search is empty', async () => {
@@ -324,6 +338,7 @@ describe('spotify_play', () => {
           tracks: { items: [{ uri: 'spotify:track:abc', name: 'Song', artists: [{ name: 'Artist' }] }] },
         }),
       },
+      ACTIVE_DEVICE_RESPONSE,
       { ok: false, status: 403 },
     ])
 
@@ -331,12 +346,15 @@ describe('spotify_play', () => {
     expect(result).toContain('Premium')
   })
 
-  it('plays using a direct URI (track)', async () => {
-    mockFetch({ ok: true, status: 204 })
+  it('plays using a direct URI (track) (device check + play = 2 fetch calls)', async () => {
+    mockFetchSequence([
+      ACTIVE_DEVICE_RESPONSE,
+      { ok: true, status: 204 },
+    ])
 
     const result = await handleSpotifyTool('spotify_play', { uri: 'spotify:track:abc123' })
-    expect(result).toBe('Playback resumed.')
-    expect(vi.mocked(fetch)).toHaveBeenCalledTimes(1)
+    expect(result).toContain('Now playing')
+    expect(vi.mocked(fetch)).toHaveBeenCalledTimes(2)
   })
 })
 

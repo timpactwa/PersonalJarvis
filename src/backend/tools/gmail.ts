@@ -59,18 +59,31 @@ export async function getAuthorizedClient(): Promise<OAuth2Client> {
   const authUrl = auth.generateAuthUrl({ access_type: 'offline', scope: SCOPES })
   console.log('[gmail] Opening browser for OAuth:', authUrl)
 
-  const code = await new Promise<string>((resolve) => {
+  const code = await new Promise<string>((resolve, reject) => {
+    let timer: ReturnType<typeof setTimeout>
     const srv = createServer((req, res) => {
       const url = new URL(req.url!, 'http://localhost:3456')
       const authCode = url.searchParams.get('code')
+      const authErr = url.searchParams.get('error')
       if (authCode) {
         res.end('Authorized! You can close this tab.')
+        clearTimeout(timer)
         srv.close()
         resolve(authCode)
+      } else if (authErr) {
+        res.end('Authorization failed. You can close this tab.')
+        clearTimeout(timer)
+        srv.close()
+        reject(new Error(`Gmail authorization was denied (${authErr}).`))
       } else {
         res.end('Waiting for authorization...')
       }
     }).listen(3456)
+    // Don't let an abandoned browser wedge every future Gmail call this session.
+    timer = setTimeout(() => {
+      try { srv.close() } catch { /* already closed */ }
+      reject(new Error('Gmail authorization timed out after 3 minutes. Run the Gmail command again to retry.'))
+    }, 180_000)
     require('child_process').exec(`start "${authUrl}"`)
   })
 

@@ -36,7 +36,7 @@ function transcribe(buf: Buffer): Promise<string> {
   console.error('[pipeline] STT: local Whisper')
   return transcribeLocal(buf)
 }
-import { chat as chatClaude, isChatAvailable, type Message } from './claude'
+import { chat as chatClaude, isChatAvailable, type Message, type PendingEntity } from './claude'
 import { chat as chatGroq } from './groq'
 import { chat as chatOllama } from './ollama'
 
@@ -98,7 +98,7 @@ function claudeWithGroqFallback(
 ) {
   return chatClaude(userText, history, memories, broadcast, undefined, undefined, forceModel).catch((err: unknown) => {
     const msg = err instanceof Error ? err.message : String(err)
-    const rateLimited = msg.includes('429') || msg.includes('rate_limit') || msg.includes('usage')
+    const rateLimited = msg.includes('429') || msg.includes('rate_limit')
     if (rateLimited) {
       if (process.env.GROQ_API_KEY) {
         console.error('[pipeline] Claude rate limited — falling back to Groq')
@@ -164,7 +164,6 @@ function chat(
   console.error('[pipeline] using Ollama LLM (last resort)')
   return chatOllama(userText, history, memories, broadcast)
 }
-import { synthesize } from './elevenlabs'
 import { synthesizeEdge } from './edgeTts'
 import { handleSpotifyTool } from './tools/spotify'
 import { initDb, closeDb, isDbAvailable, getDbError, getUsageDaily, getUsageByModel, getAllMemories, insertMemory, deleteMemory } from './memory/db'
@@ -592,6 +591,7 @@ async function processAudio(pcmBuffer: Buffer, source: string): Promise<void> {
       console.error('[pipeline] empty transcription — returning to idle')
       broadcast({ type: 'transcript', role: 'assistant', text: "I didn't catch that. Try again or type your question.", partial: false })
       broadcast({ type: 'state', state: 'idle' })
+      monitors.setIdle(true)   // no speech follows — re-enable monitor drain
       return
     }
     await runConversation(userText)
@@ -600,6 +600,7 @@ async function processAudio(pcmBuffer: Buffer, source: string): Promise<void> {
     console.error('[pipeline] error processing audio:', msg)
     broadcast({ type: 'error', message: friendlyError(err) })
     broadcast({ type: 'state', state: 'idle' })
+    monitors.setIdle(true)   // error path plays no audio; restore monitor drain
   } finally {
     isProcessing = false
     drainPending()
@@ -647,6 +648,10 @@ async function processUserText(userText: string, source: string): Promise<void> 
     console.error('[pipeline] error processing text:', msg)
     broadcast({ type: 'error', message: friendlyError(err) })
     broadcast({ type: 'state', state: 'idle' })
+    // No audio plays on the error path, so the speech_done roundtrip that
+    // normally re-enables monitor drain will never fire — re-idle here or
+    // background monitors stay paused for the rest of the session.
+    monitors.setIdle(true)
   } finally {
     isProcessing = false
     drainPending()
@@ -805,9 +810,13 @@ async function runConversation(userText: string): Promise<void> {
   const useVision = !!attachedImage?.imageBase64
   if (useVision) console.error('[pipeline] vision turn — forced Claude')
 
-  const { text, model, inputTokens, outputTokens, pendingMemory, pendingEntities } = useVision
+  const result = useVision
     ? await chatClaude(userText, conversationHistory, topMems, broadcast, attachedImage!.imageBase64, attachedImage!.mimeType)
     : await chat(userText, conversationHistory, topMems, broadcast)
+  const { text, model, inputTokens, outputTokens, pendingMemory } = result
+  // Ollama's ChatResult type omits pendingEntities; default defensively so this
+  // never throws regardless of which provider answered.
+  const pendingEntities = (result as { pendingEntities?: PendingEntity[] }).pendingEntities ?? []
 
   // Re-strip handles raw text from providers that don't pre-strip (e.g. Ollama); no-op for Groq/Claude.
   const cleaned = stripResponseTags(text)

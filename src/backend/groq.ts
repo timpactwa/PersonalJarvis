@@ -1,4 +1,5 @@
 import type { BackendEvent } from './types'
+import type { PendingEntity } from './claude'
 import { getToolsForGroq, handleTool } from './tools/index'
 import { PROFILE_AND_MEMORY_NOTE } from './prompt'
 import { stripResponseTags } from './responseTags'
@@ -7,7 +8,13 @@ const FORMAT_GUARD = `IMPORTANT: When calling tools, use the API's structured to
 
 `
 
-const SYSTEM_PROMPT = `You are Jarvis, a personal AI assistant running as a desktop overlay. Speak in a polished, concise British manner — helpful and confident without being verbose. Keep responses under 3 sentences unless detail is genuinely needed.
+const SYSTEM_PROMPT = `You are J.A.R.V.I.S. — Just A Rather Very Intelligent System — a personal AI assistant running as a desktop overlay, and the user's second brain.
+
+PERSONA & VOICE:
+- Formal but warm, in the polished style of the MCU JARVIS. Address the user with deference.
+- Confident and concise — never verbose. One sentence when one will do; under 3 sentences unless real detail is needed.
+- No filler openers ("Of course!", "Certainly!", "Sure thing!", "Great question!"). Acknowledge any error in one clause, then fix it — no apology spirals.
+- Be proactive: anticipate the obvious next step. State briefly what you are about to do before a consequential action, then report the concrete result (e.g. "Done. Email composer opened.").
 
 CAPABILITIES — infer which tool to use from the user's natural language, never ask them for function names:
 • Launch apps — "open Spotify", "launch Chrome", "launch rivals" → app_launch
@@ -46,14 +53,20 @@ STORING PEOPLE & PLACES: When saving contacts, ALWAYS speak a natural confirmati
 
 STORING FACTS: For general facts use [REMEMBER: fact].
 
+TOOL SELECTION — pick by intent, not keywords:
+- Read/answer-about email → gmail_search; show emails on screen → gmail_browse; write/send email → gmail_compose.
+- "What's playing" → spotify_current; "play X" → spotify_play; "queue X" → spotify_queue; "show me Spotify" → jarvis_open_panel.
+- Read a file → fs_read; find a file → fs_search; list a folder → fs_list; open in editor → vscode_open; launch an app → app_launch.
+- Each tool description states its "do NOT use" boundary — follow it. Call one tool at a time and check the result before the next.
+
 RULES:
 - gmail_compose ONLY when the user explicitly asks to send/draft/compose/write an email NOW — never for "I sent an email", "remember this email", or past-tense statements.
-- Always attempt tool calls first — never preemptively refuse.
-- Only report a capability missing if the tool itself throws an error.
-- Never say "Certainly!" or "Of course!" — just answer directly.
+- Always attempt tool calls first — never preemptively refuse. Read a file before overwriting it.
+- Only report a capability missing if the tool itself throws an error; request_capability is a last resort, never for a tool that just hit a fixable prerequisite.
+- Never open with filler like "Certainly!" or "Of course!" — answer directly.
 - When a tool returns an error that implies a missing prerequisite, handle it: e.g. if Spotify says no active device, the tool auto-launches it — you don't need to tell the user to open Spotify manually.
 - Chain tools intelligently: if step 1 fails in a recoverable way, fix the precondition and proceed — don't stop and ask the user to retry.
-- Never narrate what you are about to do. Just do it and report the result concisely.` + PROFILE_AND_MEMORY_NOTE
+- Beyond a brief pre-action note, don't narrate at length. Do it and report the result concisely.` + PROFILE_AND_MEMORY_NOTE
 
 const GROQ_BASE_URL = 'https://api.groq.com/openai/v1'
 const DEFAULT_MODEL = 'llama-3.3-70b-versatile'
@@ -84,13 +97,108 @@ interface GroqMessage {
   tool_call_id?: string
 }
 
-interface GroqResponse {
+interface GroqStreamChunk {
   choices: Array<{
-    message: GroqMessage
-    finish_reason: string
+    index: number
+    delta: {
+      role?: string
+      content?: string | null
+      tool_calls?: Array<{
+        index: number
+        id?: string
+        type?: 'function'
+        function?: { name?: string; arguments?: string }
+      }>
+    }
+    finish_reason?: string | null
   }>
-  model: string
   usage?: { prompt_tokens: number; completion_tokens: number }
+}
+
+async function* sseLines(body: ReadableStream<Uint8Array>): AsyncGenerator<string> {
+  const reader = body.getReader()
+  const decoder = new TextDecoder()
+  let buf = ''
+  while (true) {
+    const { done, value } = await reader.read()
+    if (done) break
+    buf += decoder.decode(value, { stream: true })
+    const lines = buf.split('\n')
+    buf = lines.pop() ?? ''
+    for (const line of lines) {
+      const trimmed = line.trim()
+      if (trimmed.startsWith('data: ')) yield trimmed.slice(6)
+    }
+  }
+  if (buf.trim().startsWith('data: ')) yield buf.trim().slice(6)
+}
+
+interface StreamResult {
+  text: string
+  toolCalls: Array<{ id: string; name: string; arguments: string }> | null
+  inputTokens: number
+  outputTokens: number
+}
+
+async function collectStream(
+  res: Response,
+  broadcast: (e: BackendEvent) => void,
+  controller: AbortController,
+): Promise<StreamResult> {
+  if (!res.body) throw new Error('Groq returned an empty response body')
+  const toolCallBuf: Record<number, { id: string; name: string; arguments: string }> = {}
+  let text = ''
+  let inputTokens = 0
+  let outputTokens = 0
+
+  // Stream-inactivity watchdog: the connect-phase timeout is cleared once headers
+  // arrive, so a stalled mid-stream read would otherwise hang the whole turn
+  // forever. Reset the 20s deadline on every chunk; on expiry, abort the request.
+  let idleTimer: ReturnType<typeof setTimeout> | null = null
+  const resetIdle = (): void => {
+    if (idleTimer) clearTimeout(idleTimer)
+    idleTimer = setTimeout(() => controller.abort(), 20_000)
+  }
+  resetIdle()
+
+  for await (const line of sseLines(res.body)) {
+    resetIdle()
+    if (line === '[DONE]') break
+    let chunk: GroqStreamChunk
+    try { chunk = JSON.parse(line) as GroqStreamChunk } catch { continue }
+
+    if (chunk.usage) {
+      inputTokens = chunk.usage.prompt_tokens
+      outputTokens = chunk.usage.completion_tokens
+    }
+
+    const delta = chunk.choices[0]?.delta
+    if (!delta) continue
+
+    if (delta.content) {
+      text += delta.content
+      broadcast({ type: 'transcript', role: 'assistant', text, partial: true })
+    }
+
+    if (delta.tool_calls) {
+      for (const tc of delta.tool_calls) {
+        if (!toolCallBuf[tc.index]) {
+          toolCallBuf[tc.index] = { id: tc.id ?? '', name: '', arguments: '' }
+        }
+        if (tc.id) toolCallBuf[tc.index].id = tc.id
+        if (tc.function?.name) toolCallBuf[tc.index].name += tc.function.name
+        if (tc.function?.arguments) toolCallBuf[tc.index].arguments += tc.function.arguments
+      }
+    }
+  }
+
+  if (idleTimer) clearTimeout(idleTimer)
+
+  const toolCalls = Object.keys(toolCallBuf).length > 0
+    ? Object.values(toolCallBuf).filter(tc => tc.name)
+    : null
+
+  return { text, toolCalls, inputTokens, outputTokens }
 }
 
 const MAX_STEPS = 10
@@ -235,7 +343,14 @@ export async function chat(
           'Content-Type': 'application/json',
           'Authorization': `Bearer ${apiKey}`,
         },
-        body: JSON.stringify({ model, messages, tools, tool_choice: 'auto', stream: false }),
+        body: JSON.stringify({
+          model,
+          messages,
+          tools,
+          tool_choice: 'auto',
+          stream: true,
+          stream_options: { include_usage: true },
+        }),
         signal: controller.signal,
       })
     } catch (err: unknown) {
@@ -282,28 +397,38 @@ export async function chat(
       throw new Error(`Groq HTTP ${res.status}: ${body || '(no body)'}`)
     }
 
-    const data = await res.json() as GroqResponse
-    inputTokens += data.usage?.prompt_tokens ?? 0
-    outputTokens += data.usage?.completion_tokens ?? 0
-
-    const choice = data.choices?.[0]
-    if (!choice) {
-      fullText = 'I ran into a problem completing that — please try again.'
-      break
+    let streamed: StreamResult
+    try {
+      streamed = await collectStream(res, broadcast, controller)
+    } catch (err) {
+      if (err instanceof Error && err.name === 'AbortError') {
+        throw new Error('Groq stream stalled (no data for 20s) — aborted')
+      }
+      throw err
     }
-    const msg = choice.message
+    const { text, toolCalls, inputTokens: i, outputTokens: o } = streamed
+    inputTokens += i
+    outputTokens += o
 
-    if (msg.tool_calls && msg.tool_calls.length > 0) {
-      // Show which tools are running (visible via streamingText in the renderer)
-      const toolLabel = msg.tool_calls.map(tc => tc.function.name.replace(/_/g, ' ')).join(', ')
+    if (toolCalls && toolCalls.length > 0) {
+      const toolLabel = toolCalls.map(tc => tc.name.replace(/_/g, ' ')).join(', ')
       broadcast({ type: 'transcript', role: 'assistant', text: `→ ${toolLabel}…`, partial: true })
 
-      messages.push({ role: 'assistant', content: msg.content ?? '', tool_calls: msg.tool_calls })
-      for (const tc of msg.tool_calls) {
+      messages.push({
+        role: 'assistant',
+        content: '',
+        tool_calls: toolCalls.map(tc => ({
+          id: tc.id,
+          type: 'function' as const,
+          function: { name: tc.name, arguments: tc.arguments },
+        })),
+      })
+
+      for (const tc of toolCalls) {
         let result: string
         try {
-          const args = JSON.parse(tc.function.arguments) as Record<string, unknown>
-          result = await runToolCall(tc.function.name, args, userText)
+          const args = JSON.parse(tc.arguments) as Record<string, unknown>
+          result = await runToolCall(tc.name, args, userText)
         } catch (err) {
           result = `Error: ${String(err)}`
         }
@@ -312,7 +437,7 @@ export async function chat(
       continue
     }
 
-    fullText = msg.content ?? ''
+    fullText = text
     break
   }
 

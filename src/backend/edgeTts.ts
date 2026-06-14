@@ -4,7 +4,7 @@ import { getSettings } from './memory/settings'
 
 // msedge-tts uses globalThis.crypto — polyfill for Electron utility process context
 if (!globalThis.crypto) {
-  (globalThis as typeof globalThis & { crypto: typeof webcrypto }).crypto = webcrypto
+  (globalThis as { crypto?: Crypto }).crypto = webcrypto as unknown as Crypto
 }
 
 const DEFAULT_VOICE = 'en-GB-RyanNeural'

@@ -9,7 +9,7 @@ export const githubToolDefs = [
   {
     name: 'github_pr_list',
     description:
-      'List open pull requests for the current or a specified GitHub repo. Use when the user asks "what PRs are open?", "show my pull requests", or "what needs review?". Returns PR numbers, titles, authors, and status.',
+      'Lists OPEN pull requests for a GitHub repo (numbers, titles, authors, status) and also populates the GitHub panel\'s PRs tab. Use when the user asks "what PRs are open?", "show my pull requests", "what needs review?". For details/diff of ONE PR use github_pr_view; to draft a PR description use github_pr_describe.',
     input_schema: {
       type: 'object' as const,
       properties: {
@@ -74,12 +74,12 @@ export const githubToolDefs = [
   {
     name: 'github_pr_describe',
     description:
-      'Generate a professional PR title and body from the recent commits and diff. Use when the user asks "write a PR description", "describe my changes", or "draft a PR for this branch". Routes to Claude for quality — do NOT use this tool when on Groq.',
+      'Gathers the current branch\'s commits and diff stat versus a base branch so you can write a professional PR title (≤72 chars) and body. Use when the user asks to "write a PR description", "describe my changes", or "draft a PR for this branch". Not available on the Groq provider (it is filtered out there) — only Claude can call it. Do NOT use to list or view existing PRs (use github_pr_list / github_pr_view).',
     input_schema: {
       type: 'object' as const,
       properties: {
-        repo: { type: 'string', description: 'owner/repo slug. Omit to use current directory.' },
-        base: { type: 'string', description: 'Base branch to compare against (default "main").' },
+        repo: { type: 'string', description: 'A local repo directory path. Omit to use the current working directory.' },
+        base: { type: 'string', description: 'Base branch to compare the current branch against (default "main").' },
       },
       required: [],
     },
@@ -122,18 +122,34 @@ function repoArgs(repo?: string): string[] {
   return repo ? ['-R', repo] : []
 }
 
+function isAuthError(out: string): boolean {
+  return out.startsWith('gh CLI') || out.startsWith('Not auth') || out.startsWith('GitHub CLI')
+}
+
+function emitErrorRows(tab: 'STATUS' | 'PRs' | 'ISSUES' | 'COMMITS', message: string): void {
+  try {
+    emitEvent({ type: 'github_data', tab, rows: [{ title: message, badge: 'ERROR', badgeColor: '#ef4444' }] })
+  } catch { /* non-critical */ }
+}
+
 async function prList(repo?: string, limit = 10): Promise<string> {
   const args = ['pr', 'list', ...repoArgs(repo), '--limit', String(limit), '--json',
     'number,title,author,state,updatedAt,isDraft']
   const out = await runGh(args)
-  if (out.startsWith('gh CLI') || out.startsWith('Not auth') || out.startsWith('GitHub CLI')) return out
+  if (isAuthError(out)) {
+    emitErrorRows('PRs', out)
+    return out
+  }
 
   try {
     const prs = JSON.parse(out) as Array<{
       number: number; title: string; author: { login: string }
       state: string; updatedAt: string; isDraft: boolean
     }>
-    if (prs.length === 0) return 'No open pull requests.'
+    if (prs.length === 0) {
+      emitEvent({ type: 'github_data', tab: 'PRs', rows: [] })
+      return 'No open pull requests.'
+    }
     const result = prs.map(pr =>
       `#${pr.number} ${pr.isDraft ? '[DRAFT] ' : ''}${pr.title}\n  by @${pr.author.login} · updated ${new Date(pr.updatedAt).toLocaleDateString()}`
     ).join('\n\n')
@@ -149,6 +165,7 @@ async function prList(repo?: string, limit = 10): Promise<string> {
     } catch { /* non-critical */ }
     return result
   } catch {
+    emitErrorRows('PRs', out.slice(0, 80))
     return out
   }
 }
@@ -185,14 +202,20 @@ async function issueList(repo?: string, label?: string, limit = 10): Promise<str
     'number,title,author,labels,updatedAt']
   if (label) args.push('--label', label)
   const out = await runGh(args)
-  if (out.startsWith('gh CLI') || out.startsWith('Not auth') || out.startsWith('GitHub CLI')) return out
+  if (isAuthError(out)) {
+    emitErrorRows('ISSUES', out)
+    return out
+  }
 
   try {
     const issues = JSON.parse(out) as Array<{
       number: number; title: string; author: { login: string }
       labels: Array<{ name: string }>; updatedAt: string
     }>
-    if (issues.length === 0) return 'No open issues.'
+    if (issues.length === 0) {
+      emitEvent({ type: 'github_data', tab: 'ISSUES', rows: [] })
+      return 'No open issues.'
+    }
     const result = issues.map(i => {
       const labels = i.labels.map(l => l.name).join(', ')
       return `#${i.number} ${i.title}\n  by @${i.author.login}${labels ? ` · [${labels}]` : ''}`
@@ -209,30 +232,38 @@ async function issueList(repo?: string, label?: string, limit = 10): Promise<str
     } catch { /* non-critical */ }
     return result
   } catch {
+    emitErrorRows('ISSUES', out.slice(0, 80))
     return out
   }
 }
 
 async function commitLog(repo?: string, limit = 10): Promise<string> {
   const cwd = repo && !repo.includes('/') ? repo : undefined
-  const repoFlag = repo?.includes('/') ? repoArgs(repo) : []
-  let result: string
-  if (repoFlag.length > 0) {
-    const args = ['api', `repos/${repo}/commits`, '--jq',
-      `.[0:${limit}] | .[] | "\\(.sha[0:7]) \\(.commit.message | split("\\n")[0]) — \\(.commit.author.name)"`,
-    ]
-    result = await runGh(args)
-  } else {
-    result = await runGit(['log', `--max-count=${limit}`, '--oneline', '--no-decorate'], cwd)
-  }
+  const repoSlug = repo?.includes('/') ? repo : undefined
+
+  // Use git log with a parseable separator
+  const result = await runGit(
+    ['log', `--max-count=${limit}`, '--format=%H\x1f%h\x1f%s\x1f%an\x1f%ar', '--no-decorate'],
+    cwd
+  )
+
   try {
     const lines = result.split('\n').filter(Boolean)
-    const rows: GithubRow[] = lines.slice(0, 10).map(line => ({
-      title: line.slice(0, 72),
-    }))
+    const rows: GithubRow[] = lines.slice(0, limit).map(line => {
+      const [fullSha, shortSha, subject, author, relTime] = line.split('\x1f')
+      const url = repoSlug ? `https://github.com/${repoSlug}/commit/${fullSha}` : undefined
+      return {
+        title: subject?.slice(0, 72) ?? line.slice(0, 72),
+        subtitle: author,
+        meta: `${shortSha} · ${relTime}`,
+        badge: url ? 'VIEW' : undefined,
+        badgeColor: url ? '#6366f1' : undefined,
+      }
+    })
     emitEvent({ type: 'github_data', tab: 'COMMITS', rows })
   } catch { /* non-critical */ }
-  return result
+
+  return result.replace(/\x1f/g, ' ')
 }
 
 async function repoStatus(repoPath?: string): Promise<string> {
@@ -256,16 +287,27 @@ async function repoStatus(repoPath?: string): Promise<string> {
     status ? `Uncommitted changes:\n${status}` : 'Working tree clean',
   ].join('\n')
   try {
-    const lines = result.split('\n').filter(l => l.trim())
-    const rows: GithubRow[] = lines.slice(0, 8).map(line => ({
-      title: line.trim().slice(0, 80),
-    }))
+    const rows: GithubRow[] = [
+      { title: `Branch: ${branch}`, badge: branch === 'main' || branch === 'master' ? 'MAIN' : 'BRANCH', badgeColor: '#10b981' },
+      { title: syncStatus, badge: aheadCount !== '0' ? `↑${aheadCount}` : behindCount !== '0' ? `↓${behindCount}` : '✓', badgeColor: aheadCount !== '0' ? '#f59e0b' : '#10b981' },
+      ...(status
+        ? status.split('\n').filter(Boolean).slice(0, 6).map(line => ({
+            title: line.trim().slice(0, 72),
+            badge: line.startsWith('M') ? 'MODIFIED' : line.startsWith('?') ? 'UNTRACKED' : line.startsWith('A') ? 'ADDED' : undefined,
+            badgeColor: '#6366f1',
+          }))
+        : [{ title: 'Working tree clean', badge: '✓', badgeColor: '#10b981' }]
+      ),
+    ]
     emitEvent({ type: 'github_data', tab: 'STATUS', rows })
   } catch { /* non-critical */ }
   return result
 }
 
-async function prDescribe(repo?: string, base = 'main'): Promise<string> {
+// `_repo` is accepted for call-signature symmetry with the other github tools,
+// but pr_describe operates on the local working-tree git repo (via runGit), so a
+// remote repo slug does not apply here.
+async function prDescribe(_repo?: string, base = 'main'): Promise<string> {
   const [log, diff] = await Promise.all([
     runGit(['log', `${base}..HEAD`, '--oneline', '--no-decorate']),
     runGit(['diff', `${base}...HEAD`, '--stat']),
