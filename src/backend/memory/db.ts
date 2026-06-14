@@ -74,6 +74,7 @@ export function initDb(): void {
       );
       CREATE INDEX IF NOT EXISTS idx_user_events_ts ON user_events(ts);
       CREATE INDEX IF NOT EXISTS idx_user_events_type ON user_events(event_type);
+      CREATE INDEX IF NOT EXISTS idx_user_events_composite ON user_events(event_type, ts);
 
       CREATE TABLE IF NOT EXISTS custom_commands (
         id TEXT PRIMARY KEY,
@@ -94,6 +95,9 @@ export function initDb(): void {
     try {
       db.exec(`ALTER TABLE entities ADD COLUMN email TEXT NOT NULL DEFAULT ''`)
     } catch { /* column already exists */ }
+    try {
+      db.exec(`CREATE UNIQUE INDEX IF NOT EXISTS idx_entities_name_unique ON entities(name COLLATE NOCASE)`)
+    } catch { /* already exists */ }
 
     dbAvailable = true
     dbError = null
@@ -182,12 +186,23 @@ export function insertUserEvent(eventType: string, value: string, metadata?: str
     getDb().prepare(
       `INSERT INTO user_events (ts, event_type, value, metadata) VALUES (?, ?, ?, ?)`
     ).run(Date.now(), eventType, value, metadata ?? null)
+    _prefCache = null // a new event invalidates the cached preference summary
   } catch { /* non-critical */ }
 }
 
+// Preference summary is rebuilt from a 30-day aggregate query on every turn, but
+// the underlying counts barely move minute-to-minute — cache it briefly so chat
+// latency doesn't pay for two GROUP BY scans each request.
+let _prefCache: { value: string | null; at: number; days: number } | null = null
+const PREF_CACHE_TTL_MS = 5 * 60_000
+
 export function getPreferenceSummary(days = 30): string | null {
   if (!dbAvailable) return null
-  const since = Date.now() - days * 86_400_000
+  const nowTs = Date.now()
+  if (_prefCache && _prefCache.days === days && nowTs - _prefCache.at < PREF_CACHE_TTL_MS) {
+    return _prefCache.value
+  }
+  const since = nowTs - days * 86_400_000
   try {
     const topTools = getDb().prepare(`
       SELECT value, COUNT(*) as cnt
@@ -203,7 +218,10 @@ export function getPreferenceSummary(days = 30): string | null {
       GROUP BY value ORDER BY cnt DESC LIMIT 3
     `).all(since) as Array<{ value: string; cnt: number }>
 
-    if (topTools.length === 0 && topSearches.length === 0) return null
+    if (topTools.length === 0 && topSearches.length === 0) {
+      _prefCache = { value: null, at: nowTs, days }
+      return null
+    }
 
     const parts: string[] = []
     if (topTools.length > 0) {
@@ -212,7 +230,9 @@ export function getPreferenceSummary(days = 30): string | null {
     if (topSearches.length > 0) {
       parts.push(`Common searches: ${topSearches.map(t => t.value).join(', ')}`)
     }
-    return parts.join('. ')
+    const result = parts.join('. ')
+    _prefCache = { value: result, at: nowTs, days }
+    return result
   } catch { return null }
 }
 
@@ -335,7 +355,7 @@ export function insertMemory(text: string, embedding: Float32Array): void {
 
 export function getAllMemories(): Array<{ id: number; text: string; timestamp: number; embedding: Float32Array }> {
   if (!dbAvailable) return []
-  const rows = getDb().prepare('SELECT id, text, timestamp, embedding FROM memories ORDER BY timestamp DESC').all() as Array<{ id: number; text: string; timestamp: number; embedding: Buffer }>
+  const rows = getDb().prepare('SELECT id, text, timestamp, embedding FROM memories ORDER BY timestamp DESC LIMIT 100').all() as Array<{ id: number; text: string; timestamp: number; embedding: Buffer }>
   return rows.map(r => ({
     id: r.id,
     text: r.text,

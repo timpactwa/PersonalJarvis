@@ -38,14 +38,16 @@ const MODEL_DEEP = 'claude-fable-5'
 
 const DEEP_KEYWORDS = ['plan', 'analyze', 'analyse', 'compare', 'summarize', 'summarise', 'research', 'write']
 // A deep keyword alone isn't enough — the request must carry substantive
-// content. 9+ words separates "what should I plan for today" (Fast) from
+// content. 12+ words separates "what should I plan for today" (Fast) from
 // "plan out the architecture for a new auth system with oauth and jwt" (Deep).
 const DEEP_MIN_WORDS = 12
 
-// Anything touching these surfaces needs at least Sonnet.
+// Anything touching these surfaces needs at least Sonnet. These are matched
+// against the user's natural-language utterance, so they must be words a person
+// actually says — not internal tool names.
 const SMART_SIGNALS = [
   'email', 'gmail', 'github', 'pull request', 'issue', 'commit', 'repo',
-  'calendar_create', 'execute', 'fs_write', 'schedule',
+  'schedule', 'create event', 'add event', 'run', 'overwrite',
 ]
 
 // How many tool-use steps a chain may consume before escalating to Deep.

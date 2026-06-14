@@ -40,9 +40,12 @@ import { chat as chatClaude, isChatAvailable, type Message, type PendingEntity }
 import { chat as chatGroq } from './groq'
 import { chat as chatOllama } from './ollama'
 
-// Tool-keyword requests go to Groq (generous rate limits, reliable tool use).
-// Pure conversational requests go to Claude Haiku (better personality/reasoning).
-// If Claude rate-limits, Groq catches it.
+// In `auto` mode Claude handles BOTH tool and conversational requests, with
+// per-turn tiered model selection (Haiku/Sonnet/Fable via selectModel). Groq is
+// the fallback: used only when no Claude credentials are configured, or when
+// Claude rate-limits mid-request. This keyword list still matters — it picks the
+// tool-capable path when no Claude key is present, and a few callers use it to
+// gate tool-only work (e.g. skipping preference-summary injection on chat turns).
 const TOOL_KEYWORDS_ROUTE = [
   'email', 'gmail', 'calendar', 'file', 'folder', 'search', 'send', 'find',
   'launch', 'read', 'write', 'spotify', 'chrome', 'discord', 'vscode', 'rivals',
@@ -764,13 +767,21 @@ async function runConversation(userText: string): Promise<void> {
       hour: 'numeric', minute: '2-digit', hour12: true,
     })}`)
 
-    // User profile — the self-authored "about me", always front-of-context
+    // User profile — the self-authored "about me", always front-of-context.
+    // Soft-cap so a runaway profile can't bloat every single turn's input.
     const profile = getSettings().userProfile?.trim()
-    if (profile) topMems.push(`About the user: ${profile}`)
+    if (profile) {
+      const capped = profile.length > 600 ? `${profile.slice(0, 600)}…` : profile
+      topMems.push(`About the user: ${capped}`)
+    }
 
-    // Preference summary — what tools and searches this user uses most
-    const prefs = getPreferenceSummary()
-    if (prefs) topMems.push(prefs)
+    // Preference summary — what tools and searches this user uses most. Only
+    // relevant to tool-shaped requests; skip it on purely conversational turns
+    // to keep their input lean.
+    if (needsTool(userText)) {
+      const prefs = getPreferenceSummary()
+      if (prefs) topMems.push(prefs)
+    }
 
     // Link contact emails stated explicitly (e.g. "that's my mom's email")
     if (applyContactEmailHints(userText, conversationHistory)) {
