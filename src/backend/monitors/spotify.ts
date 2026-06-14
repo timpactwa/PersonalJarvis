@@ -1,4 +1,5 @@
 import { getSettings } from '../memory/settings'
+import { getAccessToken } from '../tools/spotify'
 import type { EnqueueFn, RegisterFn } from './index'
 
 interface SpotifyPlaybackState {
@@ -26,14 +27,18 @@ export function startSpotifyMonitor(enqueue: EnqueueFn, register: RegisterFn): v
   const poll = async (): Promise<void> => {
     if (!getSettings().monitorSpotify) return
     try {
-      const token = getSettings().spotifyAccessToken
+      let token: string
+      try {
+        token = await getAccessToken()
+      } catch {
+        return  // Spotify not configured or auth failed, skip silently
+      }
       const state = await fetchPlayback(token)
       if (!state) {
         stoppedCount = 0
         return
       }
 
-      // Alert when device changes to a non-Computer type
       const device = state.device
       const currentDeviceId = device?.id ?? null
       if (device && device.type !== 'Computer' && currentDeviceId !== prevDeviceId) {
@@ -42,7 +47,6 @@ export function startSpotifyMonitor(enqueue: EnqueueFn, register: RegisterFn): v
       }
       prevDeviceId = currentDeviceId
 
-      // Playback stopped detection (2 consecutive stopped polls to filter brief pauses)
       if (!state.is_playing) {
         stoppedCount++
         if (stoppedCount === 2) {

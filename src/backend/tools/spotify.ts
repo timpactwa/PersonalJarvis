@@ -53,7 +53,7 @@ async function refreshAccessToken(): Promise<string> {
   return data.access_token
 }
 
-async function getAccessToken(): Promise<string> {
+export async function getAccessToken(): Promise<string> {
   if (isTokenExpired()) return refreshAccessToken()
   return getSettings().spotifyAccessToken
 }
@@ -84,7 +84,7 @@ export const spotifyToolDefs = [
   },
   {
     name: 'spotify_play',
-    description: 'Start or resume Spotify playback. Can play a specific track, artist, album, or playlist by query, or resume the current track if no query is given. Use for "play [something]", "play something chill", "resume music".',
+    description: 'Starts or resumes Spotify playback NOW. With a query/uri it plays that track, artist, album, or playlist immediately; with no arguments it resumes whatever was paused. Use for "play [something]", "play something chill", "play my workout playlist", "resume music". For playlists pass type:"playlist" — it matches the user\'s own library first. Do NOT use to add a song after the current one (use spotify_queue) or just to find items without playing (use spotify_search).',
     input_schema: {
       type: 'object' as const,
       properties: {
@@ -123,7 +123,7 @@ export const spotifyToolDefs = [
   },
   {
     name: 'spotify_search',
-    description: 'Search Spotify for tracks, albums, artists, or playlists. Returns names and URIs. Use before spotify_play when you need to find a specific item, or when the user asks "find" or "search for" something on Spotify.',
+    description: 'Searches Spotify\'s public catalog for tracks, albums, artists, or playlists and returns their names and URIs — it does NOT play anything. Use only when the user wants to browse/find options ("search Spotify for X", "find songs by Y") or when you need a URI before another action. For "play X" just call spotify_play directly; for the user\'s own saved playlists use spotify_my_playlists.',
     input_schema: {
       type: 'object' as const,
       properties: {
@@ -141,7 +141,7 @@ export const spotifyToolDefs = [
   },
   {
     name: 'spotify_queue',
-    description: 'Add a track to the Spotify play queue. Use for "queue up [song]", "add [song] to queue", "play [song] next".',
+    description: 'Adds a track to the END of the Spotify play queue without interrupting the current song. Use for "queue up [song]", "add [song] to the queue", "play [song] next". Do NOT use to start playback immediately (use spotify_play).',
     input_schema: {
       type: 'object' as const,
       properties: {
@@ -294,17 +294,25 @@ async function searchSpotify(query: string, type: string, limit: number): Promis
 async function getActiveDeviceId(): Promise<string | null> {
   const res = await spotifyFetch('/me/player/devices')
   if (!res.ok) return null
-  const data = await res.json() as { devices: Array<{ id: string; is_active: boolean; name: string }> }
-  const active = data.devices.find(d => d.is_active)
-  if (active) return active.id
-  if (data.devices.length > 0) {
-    // Transfer playback to first available device
-    const id = data.devices[0].id
-    await spotifyFetch('/me/player', { method: 'PUT', body: JSON.stringify({ device_ids: [id] }) })
-    await new Promise(r => setTimeout(r, 800))
-    return id
-  }
-  return null
+  const data = await res.json() as { devices: Array<{ id: string; is_active: boolean; name: string; type: string }> }
+  const devices = data.devices
+
+  // Prefer a computer device that's already active
+  const activeComputer = devices.find(d => d.is_active && d.type === 'Computer')
+  if (activeComputer) return activeComputer.id
+
+  // Any active device
+  const anyActive = devices.find(d => d.is_active)
+  if (anyActive) return anyActive.id
+
+  // No active device — prefer transferring to a Computer, then any device
+  const computer = devices.find(d => d.type === 'Computer')
+  const target = computer ?? devices[0]
+  if (!target) return null
+
+  await spotifyFetch('/me/player', { method: 'PUT', body: JSON.stringify({ device_ids: [target.id] }) })
+  await new Promise(r => setTimeout(r, 800))
+  return target.id
 }
 
 async function ensureDevice(): Promise<boolean> {
@@ -368,7 +376,10 @@ async function playHandler(input: Record<string, unknown>): Promise<string> {
 
   const res = await spotifyFetch('/me/player/play', { method: 'PUT', body: bodyStr })
 
-  if (res.status === 204) return label ? `Now playing: "${label}".` : 'Playback resumed.'
+  if (res.status === 204) {
+    setTimeout(() => { void currentTrack().catch(() => {}) }, 800)
+    return label ? `Now playing: "${label}".` : 'Playback resumed.'
+  }
   if (res.status === 403) return 'Playback requires Spotify Premium.'
   if (res.status === 404) return 'No Spotify device available — open Spotify on any device and try again.'
   return `Spotify play error: ${res.status}`
@@ -382,7 +393,11 @@ async function myPlaylistsHandler(): Promise<string> {
 
 async function simpleAction(endpoint: string, method: 'PUT' | 'POST', successMsg: string): Promise<string> {
   const res = await spotifyFetch(endpoint, { method })
-  if (res.status === 204 || res.status === 200) return successMsg
+  if (res.status === 204 || res.status === 200) {
+    // Emit updated playback state after a brief delay for the Spotify API to settle
+    setTimeout(() => { void currentTrack().catch(() => {}) }, 600)
+    return successMsg
+  }
   if (res.status === 403) return 'This action requires Spotify Premium.'
   if (res.status === 404) return 'No active Spotify device found. Open Spotify on your device first.'
   return `Spotify error: ${res.status}`
