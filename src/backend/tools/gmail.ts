@@ -28,12 +28,19 @@ function getOAuth2Client(): OAuth2Client {
   return new google.auth.OAuth2(client_id, client_secret, 'http://localhost:3456')
 }
 
+let _auth: OAuth2Client | null = null
+
+export function resetAuthClient(): void {
+  _auth = null
+}
+
 export async function getAuthorizedClient(): Promise<OAuth2Client> {
+  if (_auth) return _auth
+
   const auth = getOAuth2Client()
 
   if (existsSync(TOKEN_PATH)) {
     auth.setCredentials(JSON.parse(readFileSync(TOKEN_PATH, 'utf-8')))
-    // Persist refreshed tokens so subsequent calls don't need to re-fetch
     auth.on('tokens', (newTokens) => {
       try {
         const current = existsSync(TOKEN_PATH)
@@ -44,6 +51,7 @@ export async function getAuthorizedClient(): Promise<OAuth2Client> {
         console.error('[gmail] failed to save refreshed tokens:', e)
       }
     })
+    _auth = auth
     return auth
   }
 
@@ -69,6 +77,7 @@ export async function getAuthorizedClient(): Promise<OAuth2Client> {
   const { tokens } = await auth.getToken(code)
   auth.setCredentials(tokens)
   writeFileSync(TOKEN_PATH, JSON.stringify(tokens))
+  _auth = auth
   return auth
 }
 
@@ -240,50 +249,50 @@ export async function openEventCompose(title: string, start: string, end: string
 export const gmailToolDefs = [
   {
     name: 'gmail_search',
-    description: 'Search Gmail messages inline and return a text summary (subject, sender, date, ID). Use when you need to answer a question about emails, not when the user wants to read or act on them.',
+    description: 'Searches Gmail and returns a TEXT summary (subject, sender, date, message ID) for matching messages — nothing is shown on screen. Use this when you need email data to ANSWER a question inline, e.g. "did I get an email from my boss?", "how many unread emails do I have?", "when did Amazon email me?". Do NOT use when the user wants to visually see/flip through emails on screen (use gmail_browse) or to compose mail (use gmail_compose). Follow up with gmail_read to get a message\'s full body.',
     input_schema: {
       type: 'object' as const,
       properties: {
-        query: { type: 'string', description: 'Gmail search query (e.g., "from:boss@company.com", "is:unread newer_than:7d")' },
-        max_results: { type: 'number', description: 'Max results to return (default 5)' },
+        query: { type: 'string', description: 'A Gmail search query using Gmail operators, e.g. "from:boss@company.com", "is:unread newer_than:7d", "subject:invoice". Translate the user\'s natural request into these operators.' },
+        max_results: { type: 'number', description: 'Maximum number of messages to return (default 5).' },
       },
       required: ['query'],
     },
   },
   {
     name: 'gmail_read',
-    description: 'Read the full body of a single Gmail message by its ID. Use after gmail_search to get full content.',
+    description: 'Returns the full plain-text body of ONE specific Gmail message identified by its message ID (first 5000 chars). Use only after gmail_search has given you a message ID and you need the full content to answer a detailed question. Do NOT use to find or list emails (use gmail_search) or to display emails to the user (use gmail_browse).',
     input_schema: {
       type: 'object' as const,
       properties: {
-        message_id: { type: 'string', description: 'Gmail message ID from gmail_search results' },
+        message_id: { type: 'string', description: 'The exact Gmail message ID returned in a prior gmail_search result (the "ID:" field).' },
       },
       required: ['message_id'],
     },
   },
   {
     name: 'gmail_compose',
-    description: 'Open an interactive email composer popup so the user can review, edit, and send or save a draft. Use for ANY "write", "send", "draft", "reply", or "compose" email request. Non-destructive — the user controls the final send.',
+    description: 'Opens an interactive email composer popup pre-filled with the recipient, subject, and body so the user can review, edit, and then send or save it themselves — Jarvis never sends mail automatically. Use ONLY when the user explicitly asks to send, draft, write, compose, or reply to an email RIGHT NOW, e.g. "email mom that I\'ll be late", "draft a reply to my boss". Do NOT use for past-tense or memory statements ("remember I emailed John", "I just sent an email") and do NOT use to read or search existing mail (use gmail_search / gmail_browse).',
     input_schema: {
       type: 'object' as const,
       properties: {
-        to:      { type: 'string', description: 'Recipient email address or contact name (e.g. "mom") — known contacts are resolved automatically' },
-        subject: { type: 'string', description: 'Email subject line' },
-        body:    { type: 'string', description: 'Plain-text email body' },
-        cc:      { type: 'string', description: 'CC recipients (optional, comma-separated)' },
-        bcc:     { type: 'string', description: 'BCC recipients (optional, comma-separated)' },
+        to:      { type: 'string', description: 'Recipient email address, or a known contact\'s name like "mom" or "Amanda" — saved contacts are resolved to their address automatically.' },
+        subject: { type: 'string', description: 'The email subject line. Infer a concise one from the request if the user did not state it.' },
+        body:    { type: 'string', description: 'The plain-text body of the email, written out in full based on the user\'s instructions.' },
+        cc:      { type: 'string', description: 'Optional CC recipients, comma-separated.' },
+        bcc:     { type: 'string', description: 'Optional BCC recipients, comma-separated.' },
       },
       required: ['to', 'subject', 'body'],
     },
   },
   {
     name: 'gmail_browse',
-    description: 'Pull emails into an interactive viewer popup the user can flip through. Use when the user wants to see, read, or review multiple emails (e.g. "show me my emails", "pull important emails this week"). Use Gmail query operators: is:important, is:unread, newer_than:7d, from:X, etc.',
+    description: 'Pulls matching emails into an on-screen interactive viewer popup the user can scroll and flip through. Use when the user wants to SEE or visually review their actual emails, e.g. "show me my emails", "pull up important mail from this week", "let me see my unread". Do NOT use when you only need email facts to answer a question inline (use gmail_search) or to write mail (use gmail_compose).',
     input_schema: {
       type: 'object' as const,
       properties: {
-        query:       { type: 'string', description: 'Gmail search query' },
-        max_results: { type: 'number', description: 'Max emails to pull (default 5, max 10)' },
+        query:       { type: 'string', description: 'A Gmail search query using Gmail operators (is:important, is:unread, newer_than:7d, from:X, etc.) translated from the user\'s request. Use "in:inbox" for a general "show my emails".' },
+        max_results: { type: 'number', description: 'Maximum number of emails to load into the viewer (default 5, max 10).' },
       },
       required: ['query'],
     },
@@ -293,25 +302,25 @@ export const gmailToolDefs = [
 export const calendarToolDefs = [
   {
     name: 'calendar_list',
-    description: 'List upcoming Google Calendar events and return them as text.',
+    description: 'Returns the user\'s upcoming Google Calendar events as text (title and start time), soonest first. Use when the user asks what is on their schedule, e.g. "what\'s on my calendar?", "do I have anything today?", "what\'s my next meeting?". This only READS events — do NOT use it to add an event (use calendar_create).',
     input_schema: {
       type: 'object' as const,
       properties: {
-        max_results: { type: 'number', description: 'Max events to return (default 10)' },
+        max_results: { type: 'number', description: 'Maximum number of upcoming events to return (default 10).' },
       },
       required: [],
     },
   },
   {
     name: 'calendar_create',
-    description: 'Open an interactive event editor popup so the user can review and confirm a new Google Calendar event before it is saved. Use for any "add event", "schedule", "create meeting" request.',
+    description: 'Opens an interactive event-editor popup pre-filled with the event details so the user can review and confirm before it is saved to Google Calendar — nothing is saved automatically. Use when the user asks to add, schedule, book, or create a calendar event or meeting, e.g. "schedule a dentist appointment Friday at 2pm", "add a meeting tomorrow morning". Do NOT use to view existing events (use calendar_list).',
     input_schema: {
       type: 'object' as const,
       properties: {
-        title:       { type: 'string', description: 'Event title' },
-        start:       { type: 'string', description: 'Start time in ISO 8601 format (e.g. 2026-06-15T14:00:00)' },
-        end:         { type: 'string', description: 'End time in ISO 8601 format' },
-        description: { type: 'string', description: 'Optional event description' },
+        title:       { type: 'string', description: 'The event title/summary, e.g. "Dentist appointment".' },
+        start:       { type: 'string', description: 'Start time in ISO 8601 local format, e.g. 2026-06-15T14:00:00. Resolve relative phrases ("tomorrow at 2pm") to an absolute date-time using the current time provided in context.' },
+        end:         { type: 'string', description: 'End time in ISO 8601 local format. If the user gives no duration, default to one hour after start.' },
+        description: { type: 'string', description: 'Optional longer description or notes for the event.' },
       },
       required: ['title', 'start', 'end'],
     },
