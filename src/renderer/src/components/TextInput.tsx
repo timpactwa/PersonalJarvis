@@ -58,18 +58,19 @@ export function TextInput({ onSubmit, disabled }: Props): JSX.Element {
             padding: '11px 44px 11px 16px',
             borderRadius: 10,
             border: '1px solid',
-            borderColor: focused ? 'rgba(3,105,161,0.45)' : 'rgba(3,105,161,0.18)',
-            background: focused ? 'rgba(255,255,255,0.96)' : 'rgba(255,255,255,0.75)',
-            color: '#0a2540',
+            borderColor: focused ? 'rgba(34,211,238,0.50)' : 'rgba(34,211,238,0.18)',
+            background: focused ? 'rgba(10,16,30,0.86)' : 'rgba(8,12,24,0.62)',
+            color: 'rgba(232,247,255,0.95)',
             fontFamily: 'var(--font-mono)',
             fontSize: 12.5,
             outline: 'none',
             boxShadow: focused
-              ? '0 2px 16px rgba(3,105,161,0.12), 0 0 0 3px rgba(3,105,161,0.06)'
-              : '0 1px 4px rgba(3,80,140,0.06)',
+              ? '0 6px 26px rgba(34,211,238,0.18), 0 0 0 3px rgba(34,211,238,0.08)'
+              : '0 2px 12px rgba(0,0,0,0.42)',
             transition: 'border-color 0.2s, box-shadow 0.2s, background 0.2s',
             letterSpacing: '0.03em',
-            backdropFilter: 'blur(8px)',
+            backdropFilter: 'blur(10px)',
+            WebkitBackdropFilter: 'blur(10px)',
           }}
         />
         {value && (
@@ -98,7 +99,7 @@ export function TextInput({ onSubmit, disabled }: Props): JSX.Element {
           fontFamily: 'var(--font-data)',
           fontSize: 9,
           letterSpacing: '0.22em',
-          color: 'rgba(3,105,161,0.28)',
+          color: 'rgba(34,211,238,0.34)',
         }}>
           CTRL+K TO FOCUS · HOLD M TO SPEAK
         </div>

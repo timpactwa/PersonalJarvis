@@ -13,9 +13,13 @@ import type { AnimState } from '../../../backend/types'
  * parameter vector, so transitions between idle / listening / thinking /
  * speaking blend smoothly instead of snapping.
  *
- * Glow is baked into pre-rendered radial-gradient sprites (one silver, one
- * blue) and composited per particle — softer and an order of magnitude
- * cheaper than ctx.shadowBlur across ~180 particles.
+ * Glow is baked into pre-rendered radial-gradient sprites (one cool-white, one
+ * cyan) and composited additively per particle — softer and an order of
+ * magnitude cheaper than ctx.shadowBlur across ~180 particles.
+ *
+ * The canvas is transparent: each frame fades existing pixels toward clear via
+ * a destination-out wipe (soft motion trails) rather than painting an opaque
+ * background, so the Backdrop's aurora shows through behind the ring.
  */
 
 interface Particle {
@@ -72,7 +76,6 @@ const NUM_DUST = 40
 const RING_RADIUS_RATIO = 0.26
 const RING_THICKNESS_RATIO = 0.05
 const PARAM_LERP = 0.045
-const BG = { r: 221, g: 239, b: 255 } // #ddeff — dream sky
 
 /** Sum of 3 uniforms -> soft gaussian-ish distribution in [-1, 1]. */
 function softRandom(): number {
@@ -150,8 +153,8 @@ export function ParticleRing({ state, amplitude = 0 }: Props): JSX.Element {
 
     const particles = createParticles()
     const dust = createDust()
-    const haloSilver = makeHaloSprite(20, 80, 180)   // deep navy glow
-    const haloBlue   = makeHaloSprite(0, 130, 225)   // sky blue glow
+    const haloSilver = makeHaloSprite(168, 232, 246) // cool white-cyan core glow
+    const haloBlue   = makeHaloSprite(34, 211, 238)  // bright cyan glow
 
     // Live (lerped) parameter vector — starts at current state's targets.
     const p0 = STATE_PARAMS[stateRef.current]
@@ -170,6 +173,16 @@ export function ParticleRing({ state, amplitude = 0 }: Props): JSX.Element {
     resize()
     window.addEventListener('resize', resize)
 
+    // Subtle pointer parallax — the ring drifts a few px against the cursor so it
+    // reads as floating in front of the backdrop. Target is lerped each frame.
+    let parTx = 0, parTy = 0   // target offset, -1..1
+    let parCx = 0, parCy = 0   // current (lerped)
+    const onMouse = (e: MouseEvent): void => {
+      parTx = (e.clientX / Math.max(1, window.innerWidth) - 0.5) * 2
+      parTy = (e.clientY / Math.max(1, window.innerHeight) - 0.5) * 2
+    }
+    window.addEventListener('mousemove', onMouse)
+
     let raf = 0
     let time = 0 // virtual frame counter normalized to 60fps
     let lastTs = 0
@@ -181,9 +194,13 @@ export function ParticleRing({ state, amplitude = 0 }: Props): JSX.Element {
       lastTs = ts
       time += dt
 
-      const cx = w / 2
-      const cy = h / 2
       const minDim = Math.min(w, h)
+      // Ease parallax toward the pointer target, then offset the ring centre.
+      parCx += (parTx - parCx) * (1 - Math.pow(0.94, dt))
+      parCy += (parTy - parCy) * (1 - Math.pow(0.94, dt))
+      const parShift = minDim * 0.014
+      const cx = w / 2 + parCx * parShift
+      const cy = h / 2 + parCy * parShift
       const sizeScale = minDim / 600
       const thickness = minDim * RING_THICKNESS_RATIO
 
@@ -207,32 +224,39 @@ export function ParticleRing({ state, amplitude = 0 }: Props): JSX.Element {
 
       ctx.setTransform(dpr, 0, 0, dpr, 0, 0)
 
-      // --- Fade-to-background instead of clear: soft motion persistence.
+      // --- Fade existing pixels toward transparent (destination-out) so the
+      // backdrop shows through while soft motion trails persist.
       ctx.globalAlpha = 1
-      ctx.fillStyle = firstFrame
-        ? `rgb(${BG.r},${BG.g},${BG.b})`
-        : `rgba(${BG.r},${BG.g},${BG.b},${cur.trail.toFixed(3)})`
-      ctx.fillRect(0, 0, w, h)
-      firstFrame = false
+      if (firstFrame) {
+        ctx.clearRect(0, 0, w, h)
+        firstFrame = false
+      } else {
+        ctx.globalCompositeOperation = 'destination-out'
+        ctx.fillStyle = `rgba(0,0,0,${cur.trail.toFixed(3)})`
+        ctx.fillRect(0, 0, w, h)
+        ctx.globalCompositeOperation = 'source-over'
+      }
 
-      // --- Ambient ring shadow — dark navy annular depth (visible on light bg).
+      // --- Ambient cyan bloom — additive annular glow that seats the ring in light.
       const pulse = 0.72 + 0.28 * Math.sin(time * 0.06)
-      const ambient = (0.025 + cur.glow * 0.055) * (cur.blue > 0.4 ? pulse : 1)
+      const ambient = (0.05 + cur.glow * 0.12) * (cur.blue > 0.4 ? pulse : 1)
       if (ambient > 0.004) {
-        const gr = ctx.createRadialGradient(cx, cy, ringRadius * 0.62, cx, cy, ringRadius * 1.45)
-        // Deep navy → sky blue as blue increases
-        const ar = Math.round(lerp(8,   0,   cur.blue))
-        const ag = Math.round(lerp(40,  100, cur.blue))
-        const ab = Math.round(lerp(130, 210, cur.blue))
+        ctx.globalCompositeOperation = 'lighter'
+        const gr = ctx.createRadialGradient(cx, cy, ringRadius * 0.55, cx, cy, ringRadius * 1.5)
+        // Soft teal → bright cyan as blue increases
+        const ar = Math.round(lerp(18,  34,  cur.blue))
+        const ag = Math.round(lerp(150, 211, cur.blue))
+        const ab = Math.round(lerp(178, 238, cur.blue))
         gr.addColorStop(0,    `rgba(${ar},${ag},${ab},0)`)
-        gr.addColorStop(0.45, `rgba(${ar},${ag},${ab},${ambient.toFixed(3)})`)
+        gr.addColorStop(0.5,  `rgba(${ar},${ag},${ab},${ambient.toFixed(3)})`)
         gr.addColorStop(1,    `rgba(${ar},${ag},${ab},0)`)
         ctx.fillStyle = gr
         ctx.fillRect(0, 0, w, h)
+        ctx.globalCompositeOperation = 'source-over'
       }
 
       // --- Dust layer: faint drifting motes around the ring, for depth.
-      ctx.fillStyle = 'rgba(30, 90, 180, 1)'
+      ctx.fillStyle = 'rgba(140, 224, 242, 1)'
       for (let i = 0; i < dust.length; i++) {
         const d = dust[i]
         d.angle += d.speed * cur.speed * 0.6 * dt
@@ -294,9 +318,10 @@ export function ParticleRing({ state, amplitude = 0 }: Props): JSX.Element {
         p.glint *= glintDecay
         const bright = Math.min(1, p.opacity * (0.4 + 0.6 * swell) + spec * 0.55 + p.glint * 0.9)
 
-        // Halo (baked glow sprite) — stronger while thinking/speaking.
+        // Halo (baked glow sprite) — additive bloom, stronger while thinking/speaking.
         const haloA = bright * (0.10 + cur.glow * 0.42 + p.glint * 0.5)
         if (haloA > 0.012) {
+          ctx.globalCompositeOperation = 'lighter'
           const hs = size * (7 + cur.glow * 5 + p.glint * 6)
           if (haloMixBlue < 0.97) {
             ctx.globalAlpha = haloA * (1 - haloMixBlue)
@@ -306,20 +331,21 @@ export function ParticleRing({ state, amplitude = 0 }: Props): JSX.Element {
             ctx.globalAlpha = haloA * haloMixBlue
             ctx.drawImage(haloBlue, x - hs / 2, y - hs / 2, hs, hs)
           }
+          ctx.globalCompositeOperation = 'source-over'
         }
 
-        // Pixel square — deep navy base on light bg, shifts toward sky blue by cur.blue.
-        // Hot/glint events flash to bright sky blue. No per-frame gradient allocation.
+        // Pixel square — light steel-cyan on the dark void, shifting toward bright
+        // cyan by cur.blue. Hot/glint events flash to near-white. No per-frame alloc.
         ctx.save()
         ctx.translate(x, y)
         ctx.rotate(p.rotation)
         ctx.globalAlpha = bright
 
         const hot = Math.min(1, spec + p.glint)
-        // idle (blue=0.25): deep navy rgb(~9,~55,~150) → thinking (blue=1): sky rgb(0,125,215)
-        const cr = Math.round(lerp(lerp(12, 0,   cur.blue), 80,  hot * 0.45))
-        const cg = Math.round(lerp(lerp(50, 125, cur.blue), 170, hot * 0.55))
-        const cb = Math.round(lerp(lerp(145, 215, cur.blue), 255, hot * 0.25))
+        // idle (blue=0.25): soft steel-cyan → thinking (blue=1): bright cyan; glint→white
+        const cr = Math.round(lerp(lerp(150, 120, cur.blue), 245, hot * 0.7))
+        const cg = Math.round(lerp(lerp(208, 226, cur.blue), 250, hot * 0.45))
+        const cb = Math.round(lerp(lerp(228, 245, cur.blue), 255, hot * 0.25))
         ctx.fillStyle = `rgb(${cr},${cg},${cb})`
 
         const sq = size * 1.35
@@ -333,6 +359,7 @@ export function ParticleRing({ state, amplitude = 0 }: Props): JSX.Element {
     raf = requestAnimationFrame(animate)
     return () => {
       window.removeEventListener('resize', resize)
+      window.removeEventListener('mousemove', onMouse)
       cancelAnimationFrame(raf)
     }
   }, [])
@@ -340,7 +367,7 @@ export function ParticleRing({ state, amplitude = 0 }: Props): JSX.Element {
   return (
     <canvas
       ref={canvasRef}
-      style={{ position: 'absolute', inset: 0, width: '100%', height: '100%' }}
+      style={{ position: 'absolute', inset: 0, width: '100%', height: '100%', pointerEvents: 'none' }}
     />
   )
 }

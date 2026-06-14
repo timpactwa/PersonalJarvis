@@ -48,6 +48,9 @@ export interface JarvisState {
   spotifyNowPlaying: { track?: string; artist?: string; isPlaying: boolean } | null
   githubData: { tab: 'STATUS' | 'PRs' | 'ISSUES' | 'COMMITS'; rows: GithubRow[] } | null
   planPreview: { id: string; steps: string[] } | null
+  capabilityMissing: { name: string; description: string } | null
+  improvementActive: boolean
+  improvementDone: boolean
 }
 
 const initial: JarvisState = {
@@ -83,6 +86,9 @@ const initial: JarvisState = {
   spotifyNowPlaying: null,
   githubData: null,
   planPreview: null,
+  capabilityMissing: null,
+  improvementActive: false,
+  improvementDone: false,
 }
 
 export function useAnimState() {
@@ -165,6 +171,16 @@ export function useAnimState() {
           return { ...prev, githubData: { tab: event.tab, rows: event.rows } }
         case 'plan_preview':
           return { ...prev, planPreview: { id: event.id, steps: event.steps } }
+        case 'capability_missing':
+          return { ...prev, capabilityMissing: { name: event.name, description: event.description } }
+        case 'improvement_started':
+          return { ...prev, improvementActive: true }
+        case 'improvement_done':
+          return { ...prev, improvementActive: false, improvementDone: true }
+        case 'improvement_error':
+          return { ...prev, improvementActive: false }
+        case 'speak_text':
+          return prev // handled in App.tsx via speechSynthesis
         default:
           return prev
       }
@@ -187,6 +203,8 @@ export function useAnimState() {
   const toggleSpotify = useCallback(() => setState(prev => ({ ...prev, spotifyOpen: !prev.spotifyOpen })), [])
   const toggleGithub = useCallback(() => setState(prev => ({ ...prev, githubOpen: !prev.githubOpen })), [])
   const closePlanPreview = useCallback(() => setState(prev => ({ ...prev, planPreview: null })), [])
+  const closeCapabilityModal = useCallback(() => setState(prev => ({ ...prev, capabilityMissing: null })), [])
+  const dismissImprovementDone = useCallback(() => setState(prev => ({ ...prev, improvementDone: false })), [])
 
-  return { state, handleEvent, toggleDashboard, toggleSettings, clearError, closeCompose, closeViewer, openCompose, closeEvent, toggleTextVisible, toggleMemories, dismissToast, closeCommand, clearReport, setImageAttached, toggleSpotify, toggleGithub, closePlanPreview }
+  return { state, handleEvent, toggleDashboard, toggleSettings, clearError, closeCompose, closeViewer, openCompose, closeEvent, toggleTextVisible, toggleMemories, dismissToast, closeCommand, clearReport, setImageAttached, toggleSpotify, toggleGithub, closePlanPreview, closeCapabilityModal, dismissImprovementDone }
 }

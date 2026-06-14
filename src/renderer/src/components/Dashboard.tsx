@@ -19,20 +19,23 @@ export function Dashboard({ open, onClose, tokensToday, costToday, model, daily,
   if (!open) return null
 
   const panelStyle: React.CSSProperties = {
-    position: 'absolute',
+    position: 'fixed',
     top: '50%',
     left: '50%',
     transform: 'translate(-50%, -50%)',
     width: '480px',
+    maxWidth: 'calc(100vw - 40px)',
+    maxHeight: 'calc(100vh - 80px)',
+    overflowY: 'auto',
     background: 'var(--ov-bg)',
     border: '1px solid var(--ov-border)',
     borderRadius: 'var(--ov-radius)',
-    padding: '32px',
+    padding: '24px 28px',
     fontFamily: 'var(--font-hud)',
     color: 'var(--ov-text)',
     boxShadow: 'var(--ov-shadow)',
     zIndex: 550,
-    animation: 'overlayIn 0.22s cubic-bezier(0.16,1,0.3,1) forwards',
+    animation: 'dashboardIn 0.22s cubic-bezier(0.16,1,0.3,1) forwards',
   }
 
   const row: React.CSSProperties = {

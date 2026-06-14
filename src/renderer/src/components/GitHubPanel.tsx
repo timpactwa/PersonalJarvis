@@ -54,7 +54,7 @@ export function GitHubPanel({ onClose, githubData, send }: Props): JSX.Element {
       aria-label="GitHub"
       style={{
         position: 'fixed',
-        top: 0,
+        top: 36,
         right: 0,
         bottom: 0,
         width: 440,

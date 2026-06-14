@@ -7,6 +7,17 @@ interface Props {
   visible?: boolean
 }
 
+function stripMarkdown(s: string): string {
+  return s
+    .replace(/\*\*\*(.*?)\*\*\*/gs, '$1')
+    .replace(/\*\*(.*?)\*\*/gs, '$1')
+    .replace(/__(.*?)__/gs, '$1')
+    .replace(/\*(.*?)\*/gs, '$1')
+    .replace(/_(.*?)_/gs, '$1')
+    .replace(/`([^`\n]+)`/g, '$1')
+    .replace(/^#{1,6}\s+/gm, '')
+}
+
 export function Transcript({ history, streamingText, visible = true }: Props): JSX.Element {
   const endRef = useRef<HTMLDivElement>(null)
 
@@ -19,8 +30,9 @@ export function Transcript({ history, streamingText, visible = true }: Props): J
   const bubbleBase = {
     maxWidth: '82%',
     padding: '8px 14px',
-    backdropFilter: 'blur(8px)',
-    boxShadow: '0 2px 8px rgba(3, 80, 140, 0.06)',
+    backdropFilter: 'blur(10px)',
+    WebkitBackdropFilter: 'blur(10px)',
+    boxShadow: '0 4px 18px rgba(0, 0, 0, 0.38)',
     fontFamily: 'var(--font-mono)',
     fontSize: 12.5,
     lineHeight: 1.55,
@@ -29,7 +41,7 @@ export function Transcript({ history, streamingText, visible = true }: Props): J
   }
 
   return (
-    <div style={{
+    <div className="no-drag" style={{
       position: 'absolute',
       bottom: 72,
       left: '50%',
@@ -57,13 +69,13 @@ export function Transcript({ history, streamingText, visible = true }: Props): J
           <div style={{
             ...bubbleBase,
             borderRadius: turn.role === 'user' ? '12px 12px 3px 12px' : '12px 12px 12px 3px',
-            background: turn.role === 'user' ? 'rgba(3, 105, 161, 0.1)' : 'rgba(255, 255, 255, 0.82)',
+            background: turn.role === 'user' ? 'rgba(34, 211, 238, 0.12)' : 'rgba(10, 16, 30, 0.72)',
             border: turn.role === 'user'
-              ? '1px solid rgba(3, 105, 161, 0.25)'
-              : '1px solid rgba(3, 105, 161, 0.1)',
-            color: turn.role === 'user' ? '#0a2540' : '#1a4060',
+              ? '1px solid rgba(34, 211, 238, 0.32)'
+              : '1px solid rgba(34, 211, 238, 0.12)',
+            color: turn.role === 'user' ? 'rgba(232, 247, 255, 0.95)' : 'rgba(220, 238, 252, 0.90)',
           }}>
-            {turn.text}
+            {turn.role === 'assistant' ? stripMarkdown(turn.text) : turn.text}
           </div>
         </div>
       ))}
@@ -75,12 +87,12 @@ export function Transcript({ history, streamingText, visible = true }: Props): J
           <div style={{
             ...bubbleBase,
             borderRadius: '12px 12px 12px 3px',
-            background: 'rgba(255, 255, 255, 0.72)',
-            border: '1px solid rgba(3, 105, 161, 0.08)',
-            color: '#1a4060',
+            background: 'rgba(10, 16, 30, 0.62)',
+            border: '1px solid rgba(34, 211, 238, 0.10)',
+            color: 'rgba(220, 238, 252, 0.88)',
             opacity: 0.88,
           }}>
-            {streamingText}
+            {stripMarkdown(streamingText)}
           </div>
         </div>
       )}

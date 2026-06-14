@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef, useState } from 'react'
 import { useWebSocket } from './hooks/useWebSocket'
 import { useAnimState } from './hooks/useAnimState'
 import { ParticleRing } from './components/ParticleRing'
+import Backdrop from './components/Backdrop'
 import { rmsFromBytes } from './lib/rms'
 import { HudOverlay } from './components/HudOverlay'
 import { Transcript } from './components/Transcript'
@@ -262,7 +263,8 @@ export default function App(): JSX.Element {
   const busy = state.anim === 'thinking'
 
   return (
-    <div style={{ width: '100vw', height: '100vh', background: '#ddefff', position: 'relative' }} onDragOver={handleDragOver} onDrop={handleDrop}>
+    <div style={{ width: '100vw', height: '100vh', background: '#05070e', position: 'relative', overflow: 'hidden' }} onDragOver={handleDragOver} onDrop={handleDrop}>
+      <Backdrop />
       <ParticleRing state={state.anim} amplitude={amplitude} />
       <div className="grid-bg" />
       <TitleBar />

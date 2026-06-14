@@ -17,10 +17,10 @@ const STATUS_LABELS: Record<AnimState, string> = {
 }
 
 const STATUS_COLORS: Record<AnimState, string> = {
-  idle:      '#16a34a',
-  listening: '#0369a1',
-  thinking:  '#b45309',
-  speaking:  '#7c3aed',
+  idle:      '#34d399', // emerald
+  listening: '#22d3ee', // cyan
+  thinking:  '#f5a524', // amber
+  speaking:  '#a78bfa', // violet
 }
 
 interface Props {
@@ -33,9 +33,15 @@ interface Props {
   onStatsClick?: () => void
   textVisible?: boolean
   onToggleText?: () => void
+  spotifyOpen?: boolean
+  githubOpen?: boolean
+  quietMode?: boolean
+  onToggleSpotify?: () => void
+  onToggleGithub?: () => void
+  onToggleQuietMode?: () => void
 }
 
-export function HudOverlay({ animState, tokensToday, costToday, model, llmProvider = 'auto', onProviderChange, onStatsClick, textVisible = true, onToggleText }: Props): JSX.Element {
+export function HudOverlay({ animState, tokensToday, costToday, model, llmProvider = 'auto', onProviderChange, onStatsClick, textVisible = true, onToggleText, spotifyOpen, githubOpen, quietMode, onToggleSpotify, onToggleGithub, onToggleQuietMode }: Props): JSX.Element {
   const cycleProvider = (): void => {
     if (!onProviderChange) return
     const idx = PROVIDER_CYCLE.indexOf(llmProvider)
@@ -56,11 +62,12 @@ export function HudOverlay({ animState, tokensToday, costToday, model, llmProvid
         pointerEvents: 'none',
       }}>
         <div style={{
-          fontFamily: 'var(--font-hud)',
+          fontFamily: 'var(--font-display)',
           fontSize: 15,
           fontWeight: 700,
-          color: '#0a2540',
-          letterSpacing: '0.3em',
+          color: 'rgba(230, 246, 255, 0.96)',
+          letterSpacing: '0.34em',
+          textShadow: '0 0 18px rgba(34, 211, 238, 0.45)',
         }}>
           JARVIS
         </div>
@@ -68,7 +75,8 @@ export function HudOverlay({ animState, tokensToday, costToday, model, llmProvid
           width: 36,
           height: 1,
           background: 'linear-gradient(90deg, var(--accent), transparent)',
-          margin: '4px 0',
+          margin: '5px 0',
+          boxShadow: '0 0 8px rgba(34, 211, 238, 0.5)',
         }} />
         <div style={{
           fontFamily: 'var(--font-data)',
@@ -81,7 +89,11 @@ export function HudOverlay({ animState, tokensToday, costToday, model, llmProvid
           alignItems: 'center',
           gap: 6,
         }}>
-          <span style={{ fontSize: 8 }}>●</span>
+          <span style={{
+            fontSize: 8,
+            textShadow: '0 0 8px currentColor',
+            animation: animState === 'thinking' ? 'statusPulse 1.2s ease-in-out infinite' : undefined,
+          }}>●</span>
           {STATUS_LABELS[animState]}
         </div>
       </div>
@@ -112,25 +124,56 @@ export function HudOverlay({ animState, tokensToday, costToday, model, llmProvid
             title={textVisible ? 'Hide transcript' : 'Show transcript'}
             className="pill-btn"
             style={{
-              background: textVisible ? 'rgba(3,105,161,0.18)' : 'rgba(3,105,161,0.04)',
+              background: textVisible ? 'rgba(var(--accent-rgb),0.16)' : 'rgba(var(--accent-rgb),0.04)',
               color: textVisible ? 'var(--accent)' : 'var(--text-dim)',
             }}
           >
             TEXT
           </button>
+          <button
+            onClick={onToggleSpotify}
+            title="Spotify"
+            className={`pill-btn pill-btn--icon${spotifyOpen ? ' pill-btn--active' : ''}`}
+          >
+            ♫
+          </button>
+          <button
+            onClick={onToggleGithub}
+            title="GitHub"
+            className={`pill-btn pill-btn--icon${githubOpen ? ' pill-btn--active' : ''}`}
+          >
+            GH
+          </button>
+          <button
+            onClick={onToggleQuietMode}
+            title={quietMode ? 'Quiet mode on — click to disable' : 'Enable quiet mode'}
+            className={`pill-btn pill-btn--icon${quietMode ? ' pill-btn--active' : ''}`}
+          >
+            {quietMode ? '🔇' : '🔊'}
+          </button>
         </div>
         <div style={{
           fontFamily: 'var(--font-data)',
-          fontSize: 12,
-          fontWeight: 500,
-          letterSpacing: '0.08em',
-          color: 'var(--text-mid)',
+          fontSize: 11,
+          fontWeight: 600,
+          letterSpacing: '0.06em',
+          color: 'var(--text)',
           textAlign: 'right',
           lineHeight: 1.5,
+          background: 'var(--glass)',
+          backdropFilter: 'blur(12px)',
+          WebkitBackdropFilter: 'blur(12px)',
+          border: '1px solid var(--border)',
+          borderRadius: 6,
+          padding: '2px 8px',
         }}>
-          <span style={{ color: 'var(--accent)' }}>{tokensToday.toLocaleString()}</span>
+          <span style={{ color: 'var(--accent)', fontWeight: 700 }}>
+            {tokensToday > 0 ? tokensToday.toLocaleString() : '—'}
+          </span>
           <span style={{ color: 'var(--text-dim)', margin: '0 4px' }}>·</span>
-          <span style={{ color: 'var(--text-mid)' }}>${costToday.toFixed(4)}</span>
+          <span style={{ color: 'var(--text)', fontWeight: 600 }}>
+            {costToday > 0 ? `$${costToday.toFixed(4)}` : '$0.00'}
+          </span>
         </div>
         <button
           onClick={cycleProvider}

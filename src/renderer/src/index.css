@@ -13,6 +13,6 @@ body,
 
 body {
   font-family: 'JetBrains Mono', monospace;
-  background-color: #0a0e27;
-  color: #00ff9f;
+  background-color: #05070e;
+  color: rgba(226, 244, 255, 0.92);
 }

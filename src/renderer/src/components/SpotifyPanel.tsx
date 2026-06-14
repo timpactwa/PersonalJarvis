@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useRef } from 'react'
 import type { RendererEvent } from '../../../backend/types'
 
 interface Props {
@@ -8,25 +8,28 @@ interface Props {
 }
 
 export function SpotifyPanel({ onClose, nowPlaying, send }: Props): JSX.Element {
-  const [query, setQuery] = useState('')
-  const [hasLoaded, setHasLoaded] = useState(false)
   const sendRef = useRef(send)
   sendRef.current = send
 
-  // On open: ask the backend for current playback state.
+  // On open: fetch current state directly (bypasses LLM)
   useEffect(() => {
-    sendRef.current({ type: 'command', text: 'spotify current' })
-    setHasLoaded(true)
+    sendRef.current({ type: 'spotify_refresh' })
+  }, [])
+
+  // Poll every 5 seconds while panel is open
+  useEffect(() => {
+    const id = setInterval(() => {
+      sendRef.current({ type: 'spotify_refresh' })
+    }, 5000)
+    return () => clearInterval(id)
   }, [])
 
   const isPlaying = nowPlaying?.isPlaying === true
-  const isLoading = !hasLoaded && nowPlaying === null
+  // Show skeleton only before the first response arrives
+  const isLoading = nowPlaying === null
 
-  const submitSearch = (): void => {
-    const q = query.trim()
-    if (!q) return
-    send({ type: 'command', text: `spotify play ${q}` })
-    setQuery('')
+  const sendCommand = (text: string): void => {
+    send({ type: 'command', text })
   }
 
   return (
@@ -61,9 +64,19 @@ export function SpotifyPanel({ onClose, nowPlaying, send }: Props): JSX.Element 
         >
           {'♫'} SPOTIFY
         </span>
-        <button className="pill-btn pill-btn--icon" onClick={onClose} aria-label="Close">
-          {'✕'}
-        </button>
+        <div style={{ display: 'flex', gap: 6 }}>
+          <button
+            className="pill-btn pill-btn--icon"
+            onClick={() => sendRef.current({ type: 'spotify_refresh' })}
+            aria-label="Refresh"
+            title="Refresh playback state"
+          >
+            ↺
+          </button>
+          <button className="pill-btn pill-btn--icon" onClick={onClose} aria-label="Close">
+            {'✕'}
+          </button>
+        </div>
       </div>
 
       {/* Now-playing card */}
@@ -127,7 +140,6 @@ export function SpotifyPanel({ onClose, nowPlaying, send }: Props): JSX.Element 
               >
                 {nowPlaying?.artist ?? 'Unknown artist'}
               </div>
-              {/* Progress bar (decorative — live position is a future enhancement) */}
               <div
                 style={{
                   marginTop: 8,
@@ -165,35 +177,35 @@ export function SpotifyPanel({ onClose, nowPlaying, send }: Props): JSX.Element 
       <div style={{ marginTop: 16, display: 'flex', justifyContent: 'center', gap: 8 }}>
         <button
           className="pill-btn pill-btn--icon"
-          onClick={() => send({ type: 'command', text: 'spotify previous' })}
+          onClick={() => sendCommand('spotify previous')}
           aria-label="Previous track"
         >
           {'⏮'}
         </button>
         <button
           className={`pill-btn pill-btn--icon${isPlaying ? ' pill-btn--active' : ''}`}
-          onClick={() => send({ type: 'command', text: isPlaying ? 'spotify pause' : 'spotify play' })}
+          onClick={() => sendCommand(isPlaying ? 'spotify pause' : 'spotify play')}
           aria-label={isPlaying ? 'Pause' : 'Play'}
         >
           {isPlaying ? '⏸' : '▶'}
         </button>
         <button
           className="pill-btn pill-btn--icon"
-          onClick={() => send({ type: 'command', text: 'spotify next' })}
+          onClick={() => sendCommand('spotify next')}
           aria-label="Next track"
         >
           {'⏭'}
         </button>
         <button
           className="pill-btn pill-btn--icon"
-          onClick={() => send({ type: 'command', text: 'spotify volume down' })}
+          onClick={() => sendCommand('spotify volume down')}
           aria-label="Volume down"
         >
           {'−'}
         </button>
         <button
           className="pill-btn pill-btn--icon"
-          onClick={() => send({ type: 'command', text: 'spotify volume up' })}
+          onClick={() => sendCommand('spotify volume up')}
           aria-label="Volume up"
         >
           {'+'}
@@ -204,21 +216,7 @@ export function SpotifyPanel({ onClose, nowPlaying, send }: Props): JSX.Element 
       <div style={{ margin: '16px 0', height: 1, background: 'var(--ov-separator)' }} />
 
       {/* Search */}
-      <div style={{ display: 'flex', gap: 8 }}>
-        <input
-          className="ov-input"
-          style={{ flex: 1 }}
-          value={query}
-          onChange={e => setQuery(e.target.value)}
-          onKeyDown={e => {
-            if (e.key === 'Enter') submitSearch()
-          }}
-          placeholder="Search tracks, artists…"
-        />
-        <button className="pill-btn pill-btn--sm" onClick={submitSearch} disabled={!query.trim()}>
-          {'▶'} PLAY
-        </button>
-      </div>
+      <SearchRow send={sendCommand} />
 
       {/* Footer hint */}
       <div
@@ -231,6 +229,30 @@ export function SpotifyPanel({ onClose, nowPlaying, send }: Props): JSX.Element 
       >
         Say &quot;play [song]&quot; or &quot;pause&quot; at any time
       </div>
+    </div>
+  )
+}
+
+function SearchRow({ send }: { send: (text: string) => void }): JSX.Element {
+  const inputRef = useRef<HTMLInputElement>(null)
+  const submit = (): void => {
+    const q = inputRef.current?.value.trim() ?? ''
+    if (!q) return
+    send(`spotify play ${q}`)
+    if (inputRef.current) inputRef.current.value = ''
+  }
+  return (
+    <div style={{ display: 'flex', gap: 8 }}>
+      <input
+        ref={inputRef}
+        className="ov-input"
+        style={{ flex: 1 }}
+        onKeyDown={e => { if (e.key === 'Enter') submit() }}
+        placeholder="Search tracks, artists…"
+      />
+      <button className="pill-btn pill-btn--sm" onClick={submit}>
+        {'▶'} PLAY
+      </button>
     </div>
   )
 }

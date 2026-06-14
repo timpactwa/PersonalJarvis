@@ -1,36 +1,47 @@
+/* ── Jarvis command-center theme ──────────────────────────
+   Deep navy void · dominant cyan · sharp amber. One dark
+   surface across the whole app; the --ov-* panel system is
+   harmonized to the same hues so chrome and panels read as
+   one continuous instrument. */
 :root {
-  --bg:           #ddefff;
-  --accent:       #0369a1;
-  --accent-dim:   rgba(3, 105, 161, 0.28);
-  --accent-ghost: rgba(3, 105, 161, 0.055);
-  --text:         #0a2540;
-  --text-mid:     #3a6a8a;
-  --text-dim:     #7aa3be;
-  --glass:        rgba(255, 255, 255, 0.78);
-  --glass-deep:   rgba(255, 255, 255, 0.94);
-  --border:       rgba(3, 105, 161, 0.14);
-  --border-hot:   rgba(3, 105, 161, 0.48);
-  --shadow:       0 4px 24px rgba(3, 80, 140, 0.12);
+  --bg:           #05070e;   /* deep navy void */
+  --bg-raised:    #0a0f1c;
+  --accent:       #22d3ee;   /* dominant cyan */
+  --accent-rgb:   34, 211, 238;
+  --accent-dim:   rgba(34, 211, 238, 0.30);
+  --accent-ghost: rgba(34, 211, 238, 0.05);
+  --amber:        #f5a524;   /* sharp secondary accent */
+  --amber-rgb:    245, 165, 36;
+  --text:         rgba(226, 244, 255, 0.92);
+  --text-mid:     rgba(160, 196, 220, 0.60);
+  --text-dim:     rgba(122, 160, 190, 0.38);
+  --glass:        rgba(10, 16, 30, 0.55);
+  --glass-deep:   rgba(8, 12, 24, 0.82);
+  --border:       rgba(34, 211, 238, 0.14);
+  --border-hot:   rgba(34, 211, 238, 0.50);
+  --shadow:       0 8px 40px rgba(0, 0, 0, 0.55);
+  --font-display: 'Orbitron', 'JetBrains Mono', monospace;
   --font-hud:     'JetBrains Mono', monospace;
   --font-data:    'JetBrains Mono', monospace;
   --font-mono:    'JetBrains Mono', monospace;
 }
 
-/* ── Dark overlay system ──────────────────────────────── */
+/* ── Dark overlay system (harmonized to the cyan/amber theme) ── */
 :root {
-  --ov-bg:          rgba(4, 6, 14, 0.96);
-  --ov-bg-raised:   rgba(10, 14, 28, 0.98);
-  --ov-border:      rgba(14, 165, 233, 0.16);
-  --ov-border-hot:  rgba(14, 165, 233, 0.50);
-  --ov-accent:      #0ea5e9;
-  --ov-accent-dim:  rgba(14, 165, 233, 0.14);
-  --ov-accent-glow: rgba(14, 165, 233, 0.28);
-  --ov-text:        rgba(255, 255, 255, 0.88);
-  --ov-text-mid:    rgba(255, 255, 255, 0.50);
-  --ov-text-dim:    rgba(255, 255, 255, 0.22);
-  --ov-separator:   rgba(255, 255, 255, 0.07);
+  --ov-bg:          rgba(6, 9, 18, 0.94);
+  --ov-bg-raised:   rgba(12, 17, 32, 0.98);
+  --ov-border:      rgba(34, 211, 238, 0.16);
+  --ov-border-hot:  rgba(34, 211, 238, 0.52);
+  --ov-accent:      #22d3ee;
+  --ov-accent-dim:  rgba(34, 211, 238, 0.14);
+  --ov-accent-glow: rgba(34, 211, 238, 0.30);
+  --ov-amber:       #f5a524;
+  --ov-text:        rgba(232, 246, 255, 0.90);
+  --ov-text-mid:    rgba(180, 205, 225, 0.52);
+  --ov-text-dim:    rgba(140, 170, 195, 0.26);
+  --ov-separator:   rgba(120, 180, 220, 0.08);
   --ov-radius:      14px;
-  --ov-shadow:      0 24px 64px rgba(0,0,0,0.65), 0 0 0 1px rgba(14,165,233,0.14);
+  --ov-shadow:      0 24px 70px rgba(0,0,0,0.72), 0 0 0 1px rgba(34,211,238,0.12), inset 0 1px 0 rgba(255,255,255,0.04);
 }
 
 /* ── Overlay animations ───────────────────────────────── */
@@ -71,6 +82,9 @@ body {
 
 #root { width: 100vw; height: 100vh; }
 
+input::placeholder, textarea::placeholder { color: rgba(160, 196, 220, 0.40); }
+::selection { background: rgba(34, 211, 238, 0.28); }
+
 .no-drag      { -webkit-app-region: no-drag; }
 .titlebar-drag { -webkit-app-region: drag; }
 
@@ -110,14 +124,14 @@ body {
 
 .li-edge {
   box-shadow:
-    inset 0 0 0 1px rgba(3, 105, 161, 0),
-    inset 0 0 80px rgba(3, 105, 161, 0);
+    inset 0 0 0 1px rgba(var(--accent-rgb), 0),
+    inset 0 0 90px rgba(var(--accent-rgb), 0);
   transition: box-shadow 0.4s ease;
 }
 .li-edge--on {
   box-shadow:
-    inset 0 0 0 1px rgba(3, 105, 161, 0.14),
-    inset 0 0 80px rgba(3, 105, 161, 0.04);
+    inset 0 0 0 1px rgba(var(--accent-rgb), 0.22),
+    inset 0 0 110px rgba(var(--accent-rgb), 0.10);
   animation: liEdgePulse 2.4s ease-in-out infinite;
 }
 
@@ -141,8 +155,8 @@ body {
   0%, 100% { opacity: 0.5; } 50% { opacity: 1; }
 }
 @keyframes liCornerPulse {
-  0%, 100% { opacity: 0.45; filter: drop-shadow(0 0 3px rgba(3,105,161,0.35)); }
-  50%       { opacity: 1;   filter: drop-shadow(0 0 8px rgba(3,105,161,0.7));  }
+  0%, 100% { opacity: 0.45; filter: drop-shadow(0 0 4px rgba(var(--accent-rgb),0.45)); }
+  50%       { opacity: 1;   filter: drop-shadow(0 0 10px rgba(var(--accent-rgb),0.85)); }
 }
 @keyframes liBarPulse {
   0%, 100% { transform: scaleY(0.2); opacity: 0.4; }
@@ -171,8 +185,8 @@ body {
 /* ── Pill buttons ─────────────────────────────────────── */
 
 .pill-btn {
-  background: rgba(3, 105, 161, 0.08);
-  border: 1px solid rgba(3, 105, 161, 0.22);
+  background: rgba(var(--accent-rgb), 0.07);
+  border: 1px solid rgba(var(--accent-rgb), 0.22);
   border-radius: 20px;
   color: var(--accent);
   cursor: pointer;
@@ -180,11 +194,12 @@ body {
   font-size: 10px;
   letter-spacing: 0.12em;
   padding: 5px 14px;
-  transition: background 0.15s, border-color 0.15s;
+  transition: background 0.15s, border-color 0.15s, box-shadow 0.15s;
 }
 .pill-btn:hover {
-  background: rgba(3, 105, 161, 0.15);
-  border-color: rgba(3, 105, 161, 0.45);
+  background: rgba(var(--accent-rgb), 0.14);
+  border-color: rgba(var(--accent-rgb), 0.45);
+  box-shadow: 0 0 14px rgba(var(--accent-rgb), 0.18);
 }
 .pill-btn:disabled {
   opacity: 0.4;
@@ -242,4 +257,84 @@ body {
   background: linear-gradient(90deg, rgba(255,255,255,0.05) 25%, rgba(255,255,255,0.10) 50%, rgba(255,255,255,0.05) 75%);
   background-size: 400px 100%;
   animation: skeletonShimmer 1.4s ease-in-out infinite;
+}
+
+/* ── Backdrop: blurred aurora + drifting HUD motif ────────
+   Layered behind the particle ring to give the void depth
+   without clutter. The aurora blobs breathe and drift; the
+   HUD ring/ticks rotate almost imperceptibly. */
+
+.bd-root {
+  position: absolute;
+  inset: 0;
+  z-index: 0;
+  pointer-events: none;
+  overflow: hidden;
+  background:
+    radial-gradient(120% 90% at 50% 8%, #0a1426 0%, #070b16 42%, #03050b 100%);
+}
+
+.bd-aurora {
+  position: absolute;
+  border-radius: 50%;
+  filter: blur(70px);
+  opacity: 0.55;
+  mix-blend-mode: screen;
+  will-change: transform, opacity;
+}
+.bd-aurora--cyan {
+  width: 52vw; height: 52vw;
+  left: 8%; top: 18%;
+  background: radial-gradient(circle, rgba(34,211,238,0.55) 0%, rgba(34,211,238,0) 68%);
+  animation: bdDriftA 26s ease-in-out infinite;
+}
+.bd-aurora--teal {
+  width: 46vw; height: 46vw;
+  right: 4%; top: 30%;
+  background: radial-gradient(circle, rgba(6,148,162,0.50) 0%, rgba(6,148,162,0) 70%);
+  animation: bdDriftB 32s ease-in-out infinite;
+}
+.bd-aurora--amber {
+  width: 34vw; height: 34vw;
+  left: 40%; bottom: 2%;
+  background: radial-gradient(circle, rgba(245,165,36,0.28) 0%, rgba(245,165,36,0) 72%);
+  animation: bdDriftC 38s ease-in-out infinite;
+}
+
+@keyframes bdDriftA {
+  0%, 100% { transform: translate(0, 0) scale(1);        opacity: 0.50; }
+  50%       { transform: translate(6vw, 4vh) scale(1.12); opacity: 0.65; }
+}
+@keyframes bdDriftB {
+  0%, 100% { transform: translate(0, 0) scale(1.05);      opacity: 0.45; }
+  50%       { transform: translate(-5vw, 6vh) scale(0.95); opacity: 0.60; }
+}
+@keyframes bdDriftC {
+  0%, 100% { transform: translate(0, 0) scale(1);        opacity: 0.22; }
+  50%       { transform: translate(-4vw, -5vh) scale(1.1); opacity: 0.34; }
+}
+
+/* Faint HUD motif — concentric rings + tick ticks, ~6% ink, slow rotation. */
+.bd-hud {
+  position: absolute;
+  inset: -10%;
+  opacity: 0.06;
+  -webkit-mask-image: radial-gradient(ellipse 70% 70% at 50% 48%, black 35%, transparent 78%);
+  mask-image:         radial-gradient(ellipse 70% 70% at 50% 48%, black 35%, transparent 78%);
+}
+.bd-hud svg { width: 100%; height: 100%; }
+.bd-hud--spin   { animation: bdSpin 220s linear infinite; transform-origin: 50% 50%; }
+.bd-hud--spin-r { animation: bdSpin 300s linear infinite reverse; transform-origin: 50% 50%; }
+
+@keyframes bdSpin { to { transform: rotate(360deg); } }
+
+/* Vignette to seat the composition and push focus to centre. */
+.bd-vignette {
+  position: absolute;
+  inset: 0;
+  background: radial-gradient(ellipse 75% 75% at 50% 46%, transparent 50%, rgba(2,4,9,0.55) 100%);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .bd-aurora, .bd-hud--spin, .bd-hud--spin-r { animation: none; }
 }
