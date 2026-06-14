@@ -7,23 +7,23 @@ export interface SearchToolDef {
 export const searchToolDefs: SearchToolDef[] = [
   {
     name: 'web_search',
-    description: 'Search the web for current information, news, weather, prices, facts, or any topic needing up-to-date data. Returns top results with titles, URLs, and descriptions. Use proactively whenever you are unsure about current or recent information — never say you lack real-time access without trying this tool first.',
+    description: 'Searches the public web and returns the top results (title, URL, snippet) for current or factual information. Use for anything that could be recent, changing, or outside your training, e.g. news, weather, sports scores, stock/crypto prices, product info, "look up X", "search for X". Use this proactively rather than saying you lack real-time access. Do NOT use it for the user\'s own Jarvis usage/cost (use jarvis_get_usage), their email (use gmail_search), or their files (use fs_search).',
     input_schema: {
       type: 'object',
       properties: {
-        query: { type: 'string', description: 'The search query' },
-        count: { type: 'number', description: 'Number of results (default 5, max 10)' },
+        query: { type: 'string', description: 'The search query phrased as you would type into a search engine, e.g. "weather Blacksburg VA today" or "Electron 28 release notes".' },
+        count: { type: 'number', description: 'Number of results to return (default 5, max 10).' },
       },
       required: ['query'],
     },
   },
   {
     name: 'web_read',
-    description: 'Fetch and extract the readable text content from a specific URL. Use after web_search to read the full content of a result for deeper research or to answer detailed questions.',
+    description: 'Fetches one specific URL and returns its readable text content (HTML stripped, first 8000 chars). Use after web_search when a result\'s snippet is not enough and you need the full page to answer a detailed question, or when the user gives you a URL to read. Requires an exact http/https URL — do NOT pass a search phrase here (use web_search to find the URL first).',
     input_schema: {
       type: 'object',
       properties: {
-        url: { type: 'string', description: 'The HTTP/HTTPS URL to fetch and read' },
+        url: { type: 'string', description: 'An exact HTTP or HTTPS URL, e.g. https://example.com/article. Usually obtained from a prior web_search result.' },
       },
       required: ['url'],
     },
@@ -43,7 +43,10 @@ interface BraveSearchResponse {
 export async function webSearch(query: string, count = 5): Promise<string> {
   const key = process.env.BRAVE_SEARCH_API_KEY
   if (!key) {
-    return 'Web search is not configured. Please set BRAVE_SEARCH_API_KEY in .env.local (get a free key at brave.com/search/api).'
+    return 'Web search is not configured. Set BRAVE_SEARCH_API_KEY in .env.local (get a free key at brave.com/search/api).'
+  }
+  if (key.length !== 32) {
+    return `Web search key looks wrong (${key.length} chars, expected 32). Check BRAVE_SEARCH_API_KEY in .env.local.`
   }
 
   const n = Math.min(Math.max(1, count), 10)
@@ -60,6 +63,9 @@ export async function webSearch(query: string, count = 5): Promise<string> {
 
   if (!res.ok) {
     const body = await res.text().catch(() => '')
+    if (res.status === 401 || res.status === 403) {
+      throw new Error(`Brave Search: invalid API key (${res.status}). Check BRAVE_SEARCH_API_KEY in .env.local.`)
+    }
     throw new Error(`Brave Search API error ${res.status}: ${body.slice(0, 200) || '(no body)'}`)
   }
 
