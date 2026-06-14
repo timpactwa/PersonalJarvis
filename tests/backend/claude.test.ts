@@ -3,7 +3,7 @@ import { selectModel, isChatAvailable } from '../../src/backend/claude'
 
 const HAIKU = 'claude-haiku-4-5-20251001'
 const SONNET = 'claude-sonnet-4-6'
-const OPUS = 'claude-opus-4-6'
+const FABLE = 'claude-fable-5'
 
 describe('selectModel — auto mode', () => {
   // ── Fast tier ──────────────────────────────────────────────
@@ -70,36 +70,36 @@ describe('selectModel — auto mode', () => {
 
   // ── Deep tier ──────────────────────────────────────────────
   it('routes spawn_agent-style research requests to Fable', () => {
-    expect(selectModel('research the top 5 javascript frameworks and compare their performance benchmarks in detail')).toBe(OPUS)
+    expect(selectModel('research the top 5 javascript frameworks and compare their performance benchmarks in detail')).toBe(FABLE)
   })
 
   it('routes explicit spawn_agent / pr_describe mentions to Fable', () => {
-    expect(selectModel('use spawn_agent for this')).toBe(OPUS)
-    expect(selectModel('run pr_describe on my branch')).toBe(OPUS)
+    expect(selectModel('use spawn_agent for this')).toBe(FABLE)
+    expect(selectModel('run pr_describe on my branch')).toBe(FABLE)
   })
 
   it('routes "plan" keyword with substantive content to Fable', () => {
-    expect(selectModel('plan out the architecture for a new authentication system with oauth and jwt')).toBe(OPUS)
+    expect(selectModel('plan out the architecture for a new authentication system with oauth and jwt')).toBe(FABLE)
   })
 
   it('routes "analyze" with substantive content to Fable', () => {
-    expect(selectModel('analyze the performance bottlenecks in the codebase and suggest specific improvements to make')).toBe(OPUS)
+    expect(selectModel('analyze the performance bottlenecks in the codebase and suggest specific improvements to make')).toBe(FABLE)
   })
 
   it('routes "summarize" with substantive content to Fable', () => {
-    expect(selectModel('summarize all the open issues and group them by priority and estimated complexity')).toBe(OPUS)
+    expect(selectModel('summarize all the open issues and group them by priority and estimated complexity')).toBe(FABLE)
   })
 
   it('short "plan" does NOT escalate to Fable', () => {
     // A deep keyword alone is not enough — Fable requires substantive content.
     const result = selectModel('what should I plan for today')
-    expect(result).not.toBe(OPUS)
+    expect(result).not.toBe(FABLE)
   })
 
   // ── stepCount escalation ───────────────────────────────────
   it('escalates to Fable when a chain has consumed ≥4 tool calls', () => {
-    expect(selectModel('pause the music', undefined, 4)).toBe(OPUS)
-    expect(selectModel('pause the music', undefined, 7)).toBe(OPUS)
+    expect(selectModel('pause the music', undefined, 4)).toBe(FABLE)
+    expect(selectModel('pause the music', undefined, 7)).toBe(FABLE)
   })
 
   it('does not escalate below 4 steps', () => {
@@ -109,7 +109,7 @@ describe('selectModel — auto mode', () => {
 
   // ── forceModel override ────────────────────────────────────
   it('respects forceModel override', () => {
-    expect(selectModel('hello', OPUS)).toBe(OPUS)
+    expect(selectModel('hello', FABLE)).toBe(FABLE)
   })
 
   it('respects haiku preference override', () => {
