@@ -161,7 +161,7 @@ import { handleSpotifyTool } from './tools/spotify'
 import { initDb, closeDb, isDbAvailable, getDbError, getUsageDaily, getUsageByModel, getAllMemories, getMemoryCount, getEntityCount } from './memory/db'
 import { logApiCall, getStatsToday } from './memory/logger'
 import { embed } from './memory/embeddings'
-import { initRecallIndex, recall, saveMemory, forgetMemory } from './memory/recall'
+import { initRecallIndex, recall, saveMemory, forgetMemory, type MemoryType } from './memory/recall'
 import { formatRecalledMemory } from './memory/attribution'
 import { resolveApproval, hasPending, getLatestPending, classifyApprovalUtterance } from './confirm'
 import { sendEmailNow, createDraft, createCalendarEvent } from './tools/gmail'
@@ -996,8 +996,11 @@ async function runConversation(
   if (pendingMemory) {
     try {
       const vec = await embed(pendingMemory)
-      saveMemory(pendingMemory, vec)
-      console.log(`[memory] saved: "${pendingMemory}"`)
+      const memType = (result as { pendingMemoryType?: MemoryType }).pendingMemoryType
+        ?? cleaned.pendingMemoryType
+        ?? 'fact'
+      saveMemory(pendingMemory, vec, { type: memType })
+      console.log(`[memory] saved (${memType}): "${pendingMemory}"`)
     } catch (err) {
       console.error('[memory] save error:', err)
     }
@@ -1019,7 +1022,7 @@ async function runConversation(
   if (cleaned.pendingMemory && !pendingMemory) {
     try {
       const vec = await embed(cleaned.pendingMemory)
-      saveMemory(cleaned.pendingMemory, vec)
+      saveMemory(cleaned.pendingMemory, vec, { type: cleaned.pendingMemoryType ?? 'fact' })
     } catch { /* non-critical */ }
   }
 

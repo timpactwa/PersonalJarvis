@@ -1,10 +1,13 @@
 import type { PendingEntity } from './claude'
+import type { MemoryType } from './memory/recall'
 import { EMAIL_RE } from './memory/contacts'
 
 const ENTITY_TAG_RE = /\[(PERSON|PLACE|PROJECT|ORG):\s*([^\]]+)\]/gi
 const REMEMBER_TAG_RE = /\[REMEMBER:\s*([^\]]+)\]/i
 const REPORT_TAG_RE = /\[REPORT:\s*(html|md)\|([^\]]+)\]/i
 const TAG_START_RE = /\[(PERSON|PLACE|PROJECT|ORG|REMEMBER|REPORT):/i
+
+const VALID_MEMORY_TYPES: ReadonlySet<string> = new Set(['fact', 'preference', 'decision', 'event', 'contact'])
 
 /** Hide internal metadata tags while the model is still streaming. */
 export function visibleStreamingText(raw: string): string {
@@ -20,16 +23,27 @@ export function sanitizeEmail(raw: string): string {
 export function stripResponseTags(raw: string): {
   text: string
   pendingMemory: string | null
+  pendingMemoryType: MemoryType | null
   pendingEntities: PendingEntity[]
   pendingReport: { format: 'html' | 'md'; content: string } | null
 } {
   let text = raw.trim()
   let pendingMemory: string | null = null
+  let pendingMemoryType: MemoryType | null = null
   const pendingEntities: PendingEntity[] = []
 
   const memMatch = text.match(REMEMBER_TAG_RE)
   if (memMatch) {
-    pendingMemory = memMatch[1].trim()
+    const body = memMatch[1].trim()
+    const pipe = body.lastIndexOf('|')
+    if (pipe >= 0) {
+      const candidate = body.slice(pipe + 1).trim().toLowerCase()
+      pendingMemory = body.slice(0, pipe).trim()
+      pendingMemoryType = VALID_MEMORY_TYPES.has(candidate) ? (candidate as MemoryType) : 'fact'
+    } else {
+      pendingMemory = body
+      pendingMemoryType = 'fact'
+    }
     text = text.replace(memMatch[0], '').trim()
   }
 
@@ -76,5 +90,5 @@ export function stripResponseTags(raw: string): {
     }
   }
 
-  return { text, pendingMemory, pendingEntities, pendingReport }
+  return { text, pendingMemory, pendingMemoryType, pendingEntities, pendingReport }
 }

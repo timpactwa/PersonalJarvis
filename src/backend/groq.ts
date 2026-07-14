@@ -58,7 +58,7 @@ STORING PEOPLE & PLACES: When saving contacts, ALWAYS speak a natural confirmati
 [PLACE: name | context]
 [PROJECT: name | context]
 
-STORING FACTS: For general facts use [REMEMBER: fact].
+STORING FACTS: To remember something durable use [REMEMBER: fact | type] where type is one of fact, preference, decision, event, contact. Example: [REMEMBER: user switched the project to pnpm | decision]. Tag liberally, decisions, stable preferences, and project state are worth remembering; skip trivia and one-off chit-chat.
 USING MEMORY: Lines like "Recently you decided:" or "You prefer:" are your own recollections of this user. Weave them into your reply naturally when relevant (e.g. "last time you went with X"). Do not recite them verbatim or announce that you are remembering.
 
 TOOL SELECTION — pick by intent, not keywords:
@@ -90,6 +90,7 @@ export interface ChatResult {
   inputTokens: number
   outputTokens: number
   pendingMemory: string | null
+  pendingMemoryType: import('./memory/recall').MemoryType | null
   pendingEntities: PendingEntity[]
   pendingReport: { format: 'html' | 'md'; content: string } | null
 }
@@ -464,12 +465,12 @@ export async function chat(
     }
   }
 
-  const { text, pendingMemory, pendingEntities, pendingReport } = stripResponseTags(fullText)
+  const { text, pendingMemory, pendingMemoryType, pendingEntities, pendingReport } = stripResponseTags(fullText)
   fullText = text
 
   broadcast({ type: 'transcript', role: 'assistant', text: fullText, partial: false })
 
-  return { text: fullText, model: `groq:${model}`, inputTokens, outputTokens, pendingMemory, pendingEntities, pendingReport }
+  return { text: fullText, model: `groq:${model}`, inputTokens, outputTokens, pendingMemory, pendingMemoryType, pendingEntities, pendingReport }
 }
 
 async function runToolCall(

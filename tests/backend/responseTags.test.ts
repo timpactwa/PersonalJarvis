@@ -108,6 +108,27 @@ describe('stripResponseTags', () => {
     expect(result.pendingEntities[0].type).toBe('org')
     expect(result.pendingEntities[0].name).toBe('Anthropic')
   })
+
+  it('parses an optional type from the REMEMBER tag', async () => {
+    const { stripResponseTags } = await import('../../src/backend/responseTags')
+    const r = stripResponseTags('Sure. [REMEMBER: switched to pnpm | decision]')
+    expect(r.pendingMemory).toBe('switched to pnpm')
+    expect(r.pendingMemoryType).toBe('decision')
+  })
+
+  it('defaults REMEMBER type to fact when absent', async () => {
+    const { stripResponseTags } = await import('../../src/backend/responseTags')
+    const r = stripResponseTags('Noted. [REMEMBER: the wifi password is hunter2]')
+    expect(r.pendingMemory).toBe('the wifi password is hunter2')
+    expect(r.pendingMemoryType).toBe('fact')
+  })
+
+  it('ignores an unknown type and falls back to fact', async () => {
+    const { stripResponseTags } = await import('../../src/backend/responseTags')
+    const r = stripResponseTags('[REMEMBER: something | bogus]')
+    expect(r.pendingMemory).toBe('something')
+    expect(r.pendingMemoryType).toBe('fact')
+  })
 })
 
 describe('visibleStreamingText', () => {
