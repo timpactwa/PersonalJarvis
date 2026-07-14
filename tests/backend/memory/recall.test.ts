@@ -113,4 +113,16 @@ describe('recall integration (db-backed)', () => {
     const hits = recall(new Float32Array([1, 0, 0]), { floor: 0.35 })
     expect(hits.some(h => h.text.includes('4815'))).toBe(true)
   })
+
+  it('saveMemory merges into a near-duplicate instead of inserting a new row', async () => {
+    const { initDb, getAllMemories } = await import('../../../src/backend/memory/db')
+    const { saveMemory, initRecallIndex } = await import('../../../src/backend/memory/recall')
+    initDb()
+    initRecallIndex()
+
+    const id1 = saveMemory('User likes espresso in the morning', new Float32Array([1, 0, 0]))
+    const id2 = saveMemory('User likes espresso in the mornings', new Float32Array([1, 0.001, 0]))  // ~identical
+    expect(id2).toBe(id1)                    // merged, same row
+    expect(getAllMemories().length).toBe(1)  // no duplicate row
+  })
 })

@@ -1,5 +1,5 @@
 import { cosineSimilarity } from './embeddings'
-import { getAllMemories, insertMemory, deleteMemory, bumpMemoryAccess } from './db'
+import { getAllMemories, insertMemory, deleteMemory, bumpMemoryAccess, mergeMemory } from './db'
 
 export type MemoryType = 'fact' | 'preference' | 'decision' | 'event' | 'contact'
 
@@ -121,13 +121,28 @@ export function nearestExisting(queryVec: Float32Array): { id: number; score: nu
   return best
 }
 
-/** Persist a memory AND keep the in-memory index in sync. Stage 1: no dedup. */
+/** Persist a memory AND keep the in-memory index in sync. */
 export function saveMemory(
   text: string,
   embedding: Float32Array,
   opts: { type?: MemoryType; source?: string } = {},
 ): number {
   const type = opts.type ?? 'fact'
+
+  // Dedup: if this is nearly identical to an existing memory, merge into it
+  // (refresh text/timestamp, bump salience) instead of adding a duplicate row.
+  const near = nearestExisting(embedding)
+  if (near && near.score >= DEDUP_THRESHOLD) {
+    mergeMemory(near.id, text, Date.now())
+    const existing = index.find(m => m.id === near.id)
+    if (existing) {
+      existing.text = text
+      existing.timestamp = Date.now()
+      existing.salience += 0.25
+    }
+    return near.id
+  }
+
   const id = insertMemory(text, embedding, type, opts.source ?? 'explicit')
   if (id > 0) {
     indexMemory({ id, text, embedding, timestamp: Date.now(), type, salience: 1, lastAccessed: 0, accessCount: 0 })
