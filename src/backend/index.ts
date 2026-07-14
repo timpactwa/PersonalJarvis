@@ -162,6 +162,7 @@ import { initDb, closeDb, isDbAvailable, getDbError, getUsageDaily, getUsageByMo
 import { logApiCall, getStatsToday } from './memory/logger'
 import { embed } from './memory/embeddings'
 import { initRecallIndex, recall, saveMemory, forgetMemory } from './memory/recall'
+import { formatRecalledMemory } from './memory/attribution'
 import { resolveApproval, hasPending, getLatestPending, classifyApprovalUtterance } from './confirm'
 import { sendEmailNow, createDraft, createCalendarEvent } from './tools/gmail'
 import { upsertEntity, findMentionedEntities, getPreferenceSummary } from './memory/db'
@@ -950,7 +951,7 @@ async function runConversation(
     // index, off the DB hot path), relevance-floored and recency/salience-weighted.
     const queryVec = await embedPromise
     for (const hit of recall(queryVec)) {
-      topMems.push(hit.text)
+      topMems.push(formatRecalledMemory(hit))
     }
   } catch (err) {
     console.error('[memory] retrieval error (continuing without memories):', err)
