@@ -71,6 +71,11 @@ export function indexSize(): number {
   return index.length
 }
 
+/** Read-only snapshot of the current in-memory index (for consolidation). */
+export function indexSnapshot(): IndexedMemory[] {
+  return index.slice()
+}
+
 /** Test helper — reset the in-memory index. */
 export function clearIndex(): void {
   index = []

@@ -162,6 +162,7 @@ import { initDb, closeDb, isDbAvailable, getDbError, getUsageDaily, getUsageByMo
 import { logApiCall, getStatsToday } from './memory/logger'
 import { embed } from './memory/embeddings'
 import { initRecallIndex, recall, saveMemory, forgetMemory, type MemoryType } from './memory/recall'
+import { consolidateOnce } from './memory/consolidate'
 import { formatRecalledMemory } from './memory/attribution'
 import { resolveApproval, hasPending, getLatestPending, classifyApprovalUtterance } from './confirm'
 import { sendEmailNow, createDraft, createCalendarEvent } from './tools/gmail'
@@ -200,6 +201,18 @@ import {
 // Initialize database
 initDb()
 initRecallIndex()
+
+// Low-frequency idle sweep to collapse near-duplicate memories that slipped past
+// insert-time dedup. Cheap, off the response path; .unref() so it never keeps
+// the process alive on shutdown.
+setInterval(() => {
+  try {
+    const { merged } = consolidateOnce()
+    if (merged > 0) console.error(`[recall] consolidation merged ${merged} duplicate memories`)
+  } catch (err) {
+    console.error('[recall] consolidation error:', err instanceof Error ? err.message : err)
+  }
+}, 30 * 60_000).unref?.()
 
 // Register background monitors (started on first WebSocket connection).
 // speakFn is wrapped in an arrow so it's a lazy reference to speakOrIdle,
