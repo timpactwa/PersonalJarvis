@@ -46,7 +46,12 @@ export function initDb(): void {
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         timestamp INTEGER NOT NULL,
         text TEXT NOT NULL,
-        embedding BLOB NOT NULL
+        embedding BLOB NOT NULL,
+        type TEXT NOT NULL DEFAULT 'fact',
+        source TEXT NOT NULL DEFAULT 'explicit',
+        salience REAL NOT NULL DEFAULT 1.0,
+        last_accessed INTEGER NOT NULL DEFAULT 0,
+        access_count INTEGER NOT NULL DEFAULT 0
       );
 
       CREATE TABLE IF NOT EXISTS settings (
@@ -98,6 +103,15 @@ export function initDb(): void {
     try {
       db.exec(`CREATE UNIQUE INDEX IF NOT EXISTS idx_entities_name_unique ON entities(name COLLATE NOCASE)`)
     } catch { /* already exists */ }
+    for (const col of [
+      `ALTER TABLE memories ADD COLUMN type TEXT NOT NULL DEFAULT 'fact'`,
+      `ALTER TABLE memories ADD COLUMN source TEXT NOT NULL DEFAULT 'explicit'`,
+      `ALTER TABLE memories ADD COLUMN salience REAL NOT NULL DEFAULT 1.0`,
+      `ALTER TABLE memories ADD COLUMN last_accessed INTEGER NOT NULL DEFAULT 0`,
+      `ALTER TABLE memories ADD COLUMN access_count INTEGER NOT NULL DEFAULT 0`,
+    ]) {
+      try { db.exec(col) } catch { /* column already exists */ }
+    }
 
     dbAvailable = true
     dbError = null
@@ -352,24 +366,42 @@ export function findMentionedEntities(text: string): Entity[] {
 
 // ── Memories ──────────────────────────────────────────────────────────────────
 
-export function insertMemory(text: string, embedding: Float32Array): void {
-  if (!dbAvailable) return
-  // Serialize ONLY this view's bytes. `Buffer.from(embedding.buffer)` would
-  // capture the entire backing ArrayBuffer (transformers.js often returns a
-  // subarray view into a larger pool), storing garbage and corrupting recall.
-  getDb().prepare(`
-    INSERT INTO memories (timestamp, text, embedding) VALUES (?, ?, ?)
-  `).run(Date.now(), text, Buffer.from(embedding.buffer, embedding.byteOffset, embedding.byteLength))
+export function insertMemory(
+  text: string,
+  embedding: Float32Array,
+  type = 'fact',
+  source = 'explicit',
+): number {
+  if (!dbAvailable) return 0
+  // Serialize ONLY this view's bytes — transformers.js returns subarray views
+  // into a pooled buffer; Buffer.from(embedding.buffer) would capture garbage.
+  const info = getDb().prepare(`
+    INSERT INTO memories (timestamp, text, embedding, type, source, salience, last_accessed, access_count)
+    VALUES (?, ?, ?, ?, ?, 1.0, 0, 0)
+  `).run(Date.now(), text, Buffer.from(embedding.buffer, embedding.byteOffset, embedding.byteLength), type, source)
+  return Number(info.lastInsertRowid)
 }
 
-export function getAllMemories(): Array<{ id: number; text: string; timestamp: number; embedding: Float32Array }> {
+export function getAllMemories(): Array<{
+  id: number; text: string; timestamp: number; embedding: Float32Array
+  type: string; salience: number; lastAccessed: number; accessCount: number
+}> {
   if (!dbAvailable) return []
-  const rows = getDb().prepare('SELECT id, text, timestamp, embedding FROM memories ORDER BY timestamp DESC LIMIT 100').all() as Array<{ id: number; text: string; timestamp: number; embedding: Buffer }>
+  const rows = getDb().prepare(
+    'SELECT id, text, timestamp, embedding, type, salience, last_accessed, access_count FROM memories ORDER BY timestamp DESC',
+  ).all() as Array<{
+    id: number; text: string; timestamp: number; embedding: Buffer
+    type: string; salience: number; last_accessed: number; access_count: number
+  }>
   return rows.map(r => ({
     id: r.id,
     text: r.text,
     timestamp: r.timestamp,
     embedding: new Float32Array(r.embedding.buffer, r.embedding.byteOffset, r.embedding.length / 4),
+    type: r.type,
+    salience: r.salience,
+    lastAccessed: r.last_accessed,
+    accessCount: r.access_count,
   }))
 }
 
@@ -377,6 +409,23 @@ export function getMemoryCount(): number {
   if (!dbAvailable) return 0
   const row = getDb().prepare('SELECT COUNT(*) AS n FROM memories').get() as { n: number }
   return row?.n ?? 0
+}
+
+export function bumpMemoryAccess(ids: number[], ts: number): void {
+  if (!dbAvailable || ids.length === 0) return
+  const placeholders = ids.map(() => '?').join(',')
+  try {
+    getDb().prepare(
+      `UPDATE memories SET last_accessed = ?, access_count = access_count + 1 WHERE id IN (${placeholders})`,
+    ).run(ts, ...ids)
+  } catch { /* non-critical: ranking still works from in-memory bumps */ }
+}
+
+export function mergeMemory(id: number, text: string, ts: number, salienceBump = 0.25): void {
+  if (!dbAvailable) return
+  getDb().prepare(
+    `UPDATE memories SET text = ?, timestamp = ?, salience = salience + ? WHERE id = ?`,
+  ).run(text, ts, salienceBump, id)
 }
 
 export function deleteMemory(id: number): void {

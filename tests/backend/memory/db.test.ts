@@ -76,6 +76,55 @@ describe('database', () => {
     expect(after[0].text).toBe('Second fact')
   })
 
+  it('adds metadata columns with defaults for new memories', async () => {
+    const { initDb, insertMemory, getAllMemories } = await import('../../../src/backend/memory/db')
+    initDb()
+    insertMemory('Likes espresso', new Float32Array([0.1, 0.2, 0.3]))
+    const [m] = getAllMemories()
+    expect(m.type).toBe('fact')
+    expect(m.salience).toBe(1)
+    expect(m.lastAccessed).toBe(0)
+    expect(m.accessCount).toBe(0)
+  })
+
+  it('insertMemory returns the new row id and accepts type/source', async () => {
+    const { initDb, insertMemory, getAllMemories } = await import('../../../src/backend/memory/db')
+    initDb()
+    const id = insertMemory("Mom's email is a@b.com", new Float32Array([0.1, 0.2, 0.3]), 'contact', 'contact-hint')
+    expect(id).toBeGreaterThan(0)
+    const [m] = getAllMemories()
+    expect(m.id).toBe(id)
+    expect(m.type).toBe('contact')
+  })
+
+  it('getAllMemories is no longer capped at 100 rows', async () => {
+    const { initDb, insertMemory, getAllMemories } = await import('../../../src/backend/memory/db')
+    initDb()
+    for (let i = 0; i < 105; i++) insertMemory(`fact ${i}`, new Float32Array([i, 0, 0]))
+    expect(getAllMemories().length).toBe(105)
+  })
+
+  it('bumpMemoryAccess updates last_accessed and increments access_count', async () => {
+    const { initDb, insertMemory, getAllMemories, bumpMemoryAccess } = await import('../../../src/backend/memory/db')
+    initDb()
+    const id = insertMemory('bump me', new Float32Array([0.1, 0.2, 0.3]))
+    bumpMemoryAccess([id], 1_700_000_000_000)
+    const [m] = getAllMemories()
+    expect(m.lastAccessed).toBe(1_700_000_000_000)
+    expect(m.accessCount).toBe(1)
+  })
+
+  it('mergeMemory replaces text, refreshes timestamp, and raises salience', async () => {
+    const { initDb, insertMemory, getAllMemories, mergeMemory } = await import('../../../src/backend/memory/db')
+    initDb()
+    const id = insertMemory('old vague text', new Float32Array([0.1, 0.2, 0.3]))
+    mergeMemory(id, 'more specific text', 1_700_000_000_001, 0.5)
+    const [m] = getAllMemories()
+    expect(m.text).toBe('more specific text')
+    expect(m.timestamp).toBe(1_700_000_000_001)
+    expect(m.salience).toBeCloseTo(1.5)
+  })
+
   it('logs api calls and aggregates daily stats', async () => {
     const { initDb, logApiCall, getStatsToday } = await import('../../../src/backend/memory/db')
     initDb()
