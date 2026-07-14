@@ -158,9 +158,10 @@ async function chat(
 }
 import { synthesizeEdge } from './edgeTts'
 import { handleSpotifyTool } from './tools/spotify'
-import { initDb, closeDb, isDbAvailable, getDbError, getUsageDaily, getUsageByModel, getAllMemories, insertMemory, deleteMemory, getMemoryCount, getEntityCount } from './memory/db'
+import { initDb, closeDb, isDbAvailable, getDbError, getUsageDaily, getUsageByModel, getAllMemories, getMemoryCount, getEntityCount } from './memory/db'
 import { logApiCall, getStatsToday } from './memory/logger'
-import { embed, findTopK } from './memory/embeddings'
+import { embed } from './memory/embeddings'
+import { initRecallIndex, recall, saveMemory, forgetMemory } from './memory/recall'
 import { resolveApproval, hasPending, getLatestPending, classifyApprovalUtterance } from './confirm'
 import { sendEmailNow, createDraft, createCalendarEvent } from './tools/gmail'
 import { upsertEntity, findMentionedEntities, getPreferenceSummary } from './memory/db'
@@ -197,6 +198,7 @@ import {
 
 // Initialize database
 initDb()
+initRecallIndex()
 
 // Register background monitors (started on first WebSocket connection).
 // speakFn is wrapped in an arrow so it's a lazy reference to speakOrIdle,
@@ -588,7 +590,7 @@ function handleRendererEvent(event: RendererEvent): void {
   }
   if (event.type === 'delete_memory') {
     try {
-      deleteMemory(event.id)
+      forgetMemory(event.id)
       const mems = getAllMemories().map(m => ({ id: m.id, text: m.text, createdAt: m.timestamp }))
       broadcast({ type: 'memories', memories: mems })
     } catch (err) {
@@ -875,7 +877,7 @@ async function runConversation(
       try {
         const mem = `${c.name}'s email is ${c.email}`
         const vec = await embed(mem)
-        insertMemory(mem, vec)
+        saveMemory(mem, vec, { type: 'contact', source: 'contact-hint' })
       } catch { /* non-critical */ }
     }
     const reply = bulkContacts.length === 1
@@ -931,7 +933,7 @@ async function runConversation(
         try {
           const mem = `${hint.contactRef}'s email is ${hint.email}`
           const vec = await embed(mem)
-          insertMemory(mem, vec)
+          saveMemory(mem, vec, { type: 'contact', source: 'contact-hint' })
           console.log(`[memory] saved contact email: "${mem}"`)
         } catch (err) {
           console.error('[memory] contact email save error:', err)
@@ -944,12 +946,11 @@ async function runConversation(
     for (const entity of mentioned) {
       topMems.push(formatEntityContext(entity))
     }
-    // Semantic memory retrieval
+    // Semantic memory retrieval — ranked across the FULL history (in-memory
+    // index, off the DB hot path), relevance-floored and recency/salience-weighted.
     const queryVec = await embedPromise
-    const allMems = getAllMemories()
-    if (allMems.length > 0) {
-      const semanticMems = findTopK(queryVec, allMems, 3).map(m => m.text)
-      topMems.push(...semanticMems)
+    for (const hit of recall(queryVec)) {
+      topMems.push(hit.text)
     }
   } catch (err) {
     console.error('[memory] retrieval error (continuing without memories):', err)
@@ -994,7 +995,7 @@ async function runConversation(
   if (pendingMemory) {
     try {
       const vec = await embed(pendingMemory)
-      insertMemory(pendingMemory, vec)
+      saveMemory(pendingMemory, vec)
       console.log(`[memory] saved: "${pendingMemory}"`)
     } catch (err) {
       console.error('[memory] save error:', err)
@@ -1017,7 +1018,7 @@ async function runConversation(
   if (cleaned.pendingMemory && !pendingMemory) {
     try {
       const vec = await embed(cleaned.pendingMemory)
-      insertMemory(cleaned.pendingMemory, vec)
+      saveMemory(cleaned.pendingMemory, vec)
     } catch { /* non-critical */ }
   }
 

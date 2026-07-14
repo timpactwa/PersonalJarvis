@@ -1,4 +1,5 @@
-import { describe, it, expect, beforeEach } from 'vitest'
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
+import { unlinkSync, existsSync } from 'fs'
 import {
   clearIndex, indexMemory, unindexMemory, indexSize, recall, nearestExisting,
   type IndexedMemory, type MemoryType,
@@ -74,5 +75,42 @@ describe('recall', () => {
     indexMemory(mem(1, [0.2, 1, 0], { salience: 5 }))
     const hits = recall(new Float32Array([1, 0, 0]), { floor: 0.35 })
     expect(hits.map(h => h.id)).toEqual([])
+  })
+})
+
+describe('recall integration (db-backed)', () => {
+  const TEST_DB = 'tests/recall-test.db'
+  function cleanup(): void { if (existsSync(TEST_DB)) { try { unlinkSync(TEST_DB) } catch { /* held on Windows */ } } }
+
+  // `recall.ts` is statically imported at the top of this file, which
+  // transitively loads `db.ts` and freezes its module-level DB_PATH constant
+  // BEFORE this beforeEach ever runs. Without vi.resetModules(), setting
+  // process.env.JARVIS_DB_PATH here would have no effect and this "isolated"
+  // test would silently read/write the real project jarvis.db. Reset the
+  // module registry so the dynamic imports below re-evaluate db.ts against
+  // the freshly-set env var.
+  beforeEach(async () => {
+    const { closeDb } = await import('../../../src/backend/memory/db')
+    closeDb()
+    process.env.JARVIS_DB_PATH = TEST_DB
+    vi.resetModules()
+    cleanup()
+  })
+  afterEach(async () => {
+    const { closeDb } = await import('../../../src/backend/memory/db')
+    closeDb()
+    cleanup()
+  })
+
+  it('recalls a memory written beyond the old 100-row window', async () => {
+    const { initDb } = await import('../../../src/backend/memory/db')
+    const { saveMemory, initRecallIndex, recall } = await import('../../../src/backend/memory/recall')
+    initDb()
+    // The distinctive memory is written FIRST, then buried under 120 newer ones.
+    saveMemory('the vault code is 4815', new Float32Array([1, 0, 0]))
+    for (let i = 0; i < 120; i++) saveMemory(`filler ${i}`, new Float32Array([0, 1, 0]))
+    initRecallIndex()  // reload from db as it would at startup
+    const hits = recall(new Float32Array([1, 0, 0]), { floor: 0.35 })
+    expect(hits.some(h => h.text.includes('4815'))).toBe(true)
   })
 })
