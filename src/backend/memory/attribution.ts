@@ -6,9 +6,12 @@ function approxAge(ms: number): string {
   const days = Math.round(ms / DAY)
   if (days <= 3) return 'recent'
   if (days < 14) return `about ${days} days ago`
-  if (days < 60) return `about ${Math.round(days / 7)} weeks ago`
-  if (days < 365) return `about ${Math.round(days / 30)} months ago`
-  return `about ${Math.round(days / 365)} years ago`
+  const weeks = Math.round(days / 7)
+  if (days < 60) return weeks === 1 ? 'about 1 week ago' : `about ${weeks} weeks ago`
+  const months = Math.round(days / 30)
+  if (days < 365) return months === 1 ? 'about 1 month ago' : `about ${months} months ago`
+  const years = Math.round(days / 365)
+  return years === 1 ? 'about 1 year ago' : `about ${years} years ago`
 }
 
 /** Frame a recalled memory with light provenance so the model weaves it in

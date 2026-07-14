@@ -31,4 +31,9 @@ describe('formatRecalledMemory', () => {
     const out = formatRecalledMemory(hit({ type: 'contact', text: "Mom's email is a@b.com", timestamp: NOW - 90 * 86_400_000 }), NOW)
     expect(out).toBe("Mom's email is a@b.com")
   })
+
+  it('singularizes a ~1-year-old memory instead of "1 years ago"', () => {
+    const out = formatRecalledMemory(hit({ timestamp: NOW - 365 * 86_400_000 }), NOW)
+    expect(out).toBe('About 1 year ago you mentioned: uses VS Code')
+  })
 })

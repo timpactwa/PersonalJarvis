@@ -126,7 +126,14 @@ describe('stripResponseTags', () => {
   it('ignores an unknown type and falls back to fact', async () => {
     const { stripResponseTags } = await import('../../src/backend/responseTags')
     const r = stripResponseTags('[REMEMBER: something | bogus]')
-    expect(r.pendingMemory).toBe('something')
+    expect(r.pendingMemory).toBe('something | bogus')
+    expect(r.pendingMemoryType).toBe('fact')
+  })
+
+  it('preserves a legitimate pipe in the memory body instead of truncating it', async () => {
+    const { stripResponseTags } = await import('../../src/backend/responseTags')
+    const r = stripResponseTags('[REMEMBER: the pipeline is ls | grep foo]')
+    expect(r.pendingMemory).toBe('the pipeline is ls | grep foo')
     expect(r.pendingMemoryType).toBe('fact')
   })
 })

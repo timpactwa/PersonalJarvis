@@ -138,11 +138,12 @@ export function saveMemory(
   // (refresh text/timestamp, bump salience) instead of adding a duplicate row.
   const near = nearestExisting(embedding)
   if (near && near.score >= DEDUP_THRESHOLD) {
-    mergeMemory(near.id, text, Date.now())
+    const now = Date.now()
+    mergeMemory(near.id, text, now)
     const existing = index.find(m => m.id === near.id)
     if (existing) {
       existing.text = text
-      existing.timestamp = Date.now()
+      existing.timestamp = now
       existing.salience += 0.25
     }
     return near.id

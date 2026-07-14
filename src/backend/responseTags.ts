@@ -36,10 +36,10 @@ export function stripResponseTags(raw: string): {
   if (memMatch) {
     const body = memMatch[1].trim()
     const pipe = body.lastIndexOf('|')
-    if (pipe >= 0) {
-      const candidate = body.slice(pipe + 1).trim().toLowerCase()
+    const candidate = pipe >= 0 ? body.slice(pipe + 1).trim().toLowerCase() : ''
+    if (pipe >= 0 && VALID_MEMORY_TYPES.has(candidate)) {
       pendingMemory = body.slice(0, pipe).trim()
-      pendingMemoryType = VALID_MEMORY_TYPES.has(candidate) ? (candidate as MemoryType) : 'fact'
+      pendingMemoryType = candidate as MemoryType
     } else {
       pendingMemory = body
       pendingMemoryType = 'fact'
