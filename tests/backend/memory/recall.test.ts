@@ -103,13 +103,14 @@ describe('recall integration (db-backed)', () => {
   })
 
   it('recalls a memory written beyond the old 100-row window', async () => {
-    const { initDb } = await import('../../../src/backend/memory/db')
-    const { saveMemory, initRecallIndex, recall } = await import('../../../src/backend/memory/recall')
+    const { initDb, insertMemory } = await import('../../../src/backend/memory/db')
+    const { saveMemory, initRecallIndex, recall, indexSize } = await import('../../../src/backend/memory/recall')
     initDb()
     // The distinctive memory is written FIRST, then buried under 120 newer ones.
     saveMemory('the vault code is 4815', new Float32Array([1, 0, 0]))
-    for (let i = 0; i < 120; i++) saveMemory(`filler ${i}`, new Float32Array([0, 1, 0]))
+    for (let i = 0; i < 120; i++) insertMemory(`filler ${i}`, new Float32Array([0, 1, 0]))
     initRecallIndex()  // reload from db as it would at startup
+    expect(indexSize()).toBeGreaterThan(100)
     const hits = recall(new Float32Array([1, 0, 0]), { floor: 0.35 })
     expect(hits.some(h => h.text.includes('4815'))).toBe(true)
   })
