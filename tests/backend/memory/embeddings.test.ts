@@ -1,4 +1,5 @@
 import { describe, it, expect } from 'vitest'
+import { cosineSimilarity } from '../../../src/backend/memory/embeddings'
 
 describe('embeddings module', () => {
   it('exports embed and findTopK functions', async () => {
@@ -26,5 +27,11 @@ describe('embeddings module', () => {
     expect(result).toHaveLength(1)
     expect(result[0].text).toBe('a')
     expect(result[0].score).toBeCloseTo(1, 5)
+  })
+
+  it('cosineSimilarity returns 0 when array lengths differ', () => {
+    const a = new Float32Array([1, 2, 3])
+    const b = new Float32Array([1, 2, 3, 4])
+    expect(cosineSimilarity(a, b)).toBe(0)
   })
 })

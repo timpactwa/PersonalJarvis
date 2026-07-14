@@ -66,4 +66,13 @@ describe('recall', () => {
     expect(near?.id).toBe(1)
     expect(near?.score).toBeGreaterThan(0.9)
   })
+
+  it('filters on raw cosine, not weighted score: excludes memory whose raw cosine is below floor despite high salience', () => {
+    // Memory with embedding [0.2, 1, 0] vs query [1, 0, 0] gives cosine ≈ 0.196 (below default floor 0.35)
+    // But with salience: 5, weighted score ≈ 0.196 * (1 + 4) ≈ 0.98 (above floor)
+    // This verifies the filter uses raw cosine, not weighted score.
+    indexMemory(mem(1, [0.2, 1, 0], { salience: 5 }))
+    const hits = recall(new Float32Array([1, 0, 0]), { floor: 0.35 })
+    expect(hits.map(h => h.id)).toEqual([])
+  })
 })
