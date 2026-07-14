@@ -4,13 +4,13 @@ export const visionToolDefs = [
   {
     name: 'jarvis_screenshot',
     description:
-      'Capture a screenshot of the current screen and analyze it visually. Use when the user asks "what am I looking at?", "what\'s on my screen?", "explain this error", "describe what I\'m working on", or any question requiring visual context.',
+      'Captures a screenshot of the user\'s current screen and analyzes it visually with a vision model. Use whenever answering needs to SEE what is on screen, e.g. "what am I looking at?", "what\'s on my screen?", "explain this error", "what does this say?", "describe what I\'m working on". Do NOT use for questions about files on disk (use fs_read) or general web facts (use web_search).',
     input_schema: {
       type: 'object' as const,
       properties: {
         prompt: {
           type: 'string',
-          description: 'What to look for or ask about in the screenshot (default: "Describe what is on the screen")',
+          description: 'The question or instruction to apply to the captured screen, e.g. "what error is shown?" or "summarize this page". Defaults to "Describe what is on the screen" if omitted.',
         },
       },
       required: [],

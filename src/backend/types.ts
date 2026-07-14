@@ -97,7 +97,11 @@ export type BackendEvent =
   | { type: 'state'; state: AnimState }
   | { type: 'transcript'; role: 'user' | 'assistant'; text: string; partial: boolean }
   | { type: 'stats'; tokensToday: number; costToday: number; model: string }
-  | { type: 'audio'; data: Buffer }
+  // Binary on the wire: 4-byte LE uint32 turn-id header + MP3 payload.
+  // turnId 0 (or absent) = unowned audio (monitor alerts) — renderer always plays it.
+  | { type: 'audio'; data: Buffer; turnId?: number }
+  | { type: 'turn'; id: number }
+  | { type: 'tts_stop' }
   | { type: 'error'; message: string }
   | { type: 'dashboard_open' }
   | { type: 'confirm_request'; id: string; action: string; detail: string }
@@ -120,8 +124,10 @@ export type BackendEvent =
   | { type: 'screenshot_request'; prompt: string }
   | { type: 'panel_open'; panel: 'spotify' | 'github' }
   | { type: 'quiet_mode_changed'; enabled: boolean }
-  | { type: 'spotify_now_playing'; track?: string; artist?: string; isPlaying: boolean }
+  | { type: 'spotify_now_playing'; track?: string; artist?: string; isPlaying: boolean; albumArt?: string }
   | { type: 'github_data'; tab: 'STATUS' | 'PRs' | 'ISSUES' | 'COMMITS'; rows: GithubRow[] }
+  | { type: 'dashboard_data'; memoryCount: number; entityCount: number; sttEngine: string; uptimeSec: number }
+  | { type: 'activity'; kind: 'action' | 'console'; text: string; detail?: string; ts: number }
   | { type: 'plan_preview'; id: string; steps: string[] }
   | { type: 'capability_missing'; name: string; description: string }
   | { type: 'improvement_started' }
@@ -137,6 +143,7 @@ export type RendererEvent =
   | { type: 'confirm_response'; id: string; approved: boolean }
   | { type: 'agent_close'; id: string }
   | { type: 'get_usage' }
+  | { type: 'get_dashboard' }
   | { type: 'get_settings' }
   | { type: 'set_settings'; settings: Partial<Settings> }
   | { type: 'email_send'; draft: EmailDraft }

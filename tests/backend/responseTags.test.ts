@@ -85,6 +85,22 @@ describe('stripResponseTags', () => {
     expect(stripResponseTags('Hello.').pendingReport).toBeNull()
   })
 
+  it('strips a REPORT tag surrounded by text on both sides', async () => {
+    const { stripResponseTags } = await import('../../src/backend/responseTags')
+    const result = stripResponseTags('before [REPORT: md|hello] after')
+    expect(result.pendingReport?.format).toBe('md')
+    expect(result.pendingReport?.content).toBe('hello')
+    expect(result.text).not.toContain('[REPORT:')
+  })
+
+  it('double-strip regression: stripping already-stripped text yields a null pendingReport', async () => {
+    const { stripResponseTags } = await import('../../src/backend/responseTags')
+    const first = stripResponseTags('before [REPORT: md|hello] after')
+    expect(first.pendingReport).not.toBeNull()
+    const second = stripResponseTags(first.text)
+    expect(second.pendingReport).toBeNull()
+  })
+
   it('handles ORG entity tag', async () => {
     const { stripResponseTags } = await import('../../src/backend/responseTags')
     const result = stripResponseTags('Noted. [ORG: Anthropic | AI research company]')

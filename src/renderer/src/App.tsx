@@ -3,14 +3,15 @@ import { useWebSocket } from './hooks/useWebSocket'
 import { useAnimState } from './hooks/useAnimState'
 import { ParticleRing } from './components/ParticleRing'
 import Backdrop from './components/Backdrop'
+import { CircuitFrame } from './components/CircuitFrame'
 import { rmsFromBytes } from './lib/rms'
+import { parseAudioFrame } from './lib/audioFrame'
 import { HudOverlay } from './components/HudOverlay'
 import { Transcript } from './components/Transcript'
 import { TextInput } from './components/TextInput'
 import { TitleBar } from './components/TitleBar'
 import { ErrorToast } from './components/ErrorToast'
 import { CompletionToast } from './components/CompletionToast'
-import { Dashboard } from './components/Dashboard'
 import { ConfirmCard } from './components/ConfirmCard'
 import { AgentCards } from './components/AgentCards'
 import { SettingsPanel } from './components/SettingsPanel'
@@ -24,6 +25,9 @@ import { ReportPanel } from './components/ReportPanel'
 import { SpotifyPanel } from './components/SpotifyPanel'
 import { GitHubPanel } from './components/GitHubPanel'
 import { ImageAttachZone } from './components/ImageAttachZone'
+import { ViewTabs } from './components/ViewTabs'
+import { DashboardView } from './components/DashboardView'
+import { ActivityView } from './components/ActivityView'
 import PlanPreviewCard from './components/PlanPreviewCard'
 import { CapabilityModal } from './components/CapabilityModal'
 import { RelaunchPrompt } from './components/RelaunchPrompt'
@@ -31,15 +35,58 @@ import type { BackendEvent, EmailDraft } from '../../backend/types'
 import './styles/global.css'
 
 export default function App(): JSX.Element {
-  const { state, handleEvent, toggleDashboard, toggleSettings, clearError, closeCompose, closeViewer, openCompose, closeEvent, toggleTextVisible, toggleMemories, dismissToast, closeCommand, clearReport, setImageAttached, toggleSpotify, toggleGithub, closePlanPreview, closeCapabilityModal, dismissImprovementDone } = useAnimState()
+  const { state, handleEvent, setView, toggleSettings, clearError, closeCompose, closeViewer, openCompose, closeEvent, toggleTextVisible, toggleMemories, dismissToast, closeCommand, clearReport, setImageAttached, toggleSpotify, toggleGithub, closePlanPreview, closeCapabilityModal, dismissImprovementDone } = useAnimState()
 
   const quietModeRef = useRef(false)
   quietModeRef.current = state.quietMode
 
+  // Live mirror of the current anim state for use inside event-callback
+  // closures (onEvent is memoized once via useCallback, so `state` there is
+  // stale). Used by the Web Speech completion path to tell a stale
+  // onend/onerror/watchdog (firing after a barge-in already moved the UI to
+  // 'listening') apart from a legitimate end-of-speech.
+  const animStateRef = useRef(state.anim)
+  animStateRef.current = state.anim
+
   const activeAudioRef = useRef<HTMLAudioElement | null>(null)
   const sendRef = useRef<((e: import('../../backend/types').RendererEvent) => void) | null>(null)
 
+  // Monotonic id of the turn currently owned by playback. Updated from every
+  // `turn` event; used to drop stale audio frames (turn id 0 is "unowned"
+  // monitor/system audio and always plays).
+  const lastTurnIdRef = useRef(0)
+
+  // Barge-in hook for the in-flight speech (if any). Set each time an
+  // `audio` frame starts playback; lets the `tts_stop` branch below reach
+  // into that closure's cleanup without threading extra state through it.
+  const activeSpeechRef = useRef<{ stopForBargeIn: () => void } | null>(null)
+
+  // The backend event union gains `turn` and `tts_stop` in a parallel edit to
+  // src/backend/types.ts; widen locally so this handler compiles regardless
+  // of merge order (see task report for detail).
+  type TurnEvent = { type: 'turn'; id: number }
+  type TtsStopEvent = { type: 'tts_stop' }
+
   const onEvent = useCallback((event: BackendEvent) => {
+    const evt = event as BackendEvent | TurnEvent | TtsStopEvent
+
+    if (evt.type === 'turn') {
+      lastTurnIdRef.current = evt.id
+      return
+    }
+
+    if (evt.type === 'tts_stop') {
+      // Backend-authoritative barge-in follow-up (the onPttStart fast-path
+      // above already killed local playback in <100ms). Stop whatever is
+      // still playing and tear down its meter/AudioContext resources, but do
+      // NOT notify (`speech_done`) or flip anim state to idle — the backend
+      // broadcasts `listening` immediately after this event.
+      activeSpeechRef.current?.stopForBargeIn()
+      activeSpeechRef.current = null
+      window.speechSynthesis.cancel()
+      return
+    }
+
     if (event.type === 'screenshot_request') {
       // Voice-triggered screenshot (jarvis_screenshot tool): ask the main
       // process to capture; the result comes back via screenshot-captured IPC.
@@ -66,14 +113,48 @@ export default function App(): JSX.Element {
       }
       const utterance = new SpeechSynthesisUtterance(event.text)
       utterance.rate = 1.1
-      utterance.onend = () => {
-        handleEvent({ type: 'state', state: 'idle' })
+
+      // Idempotent completion path shared by onend/onerror/the watchdog.
+      // Chromium can silently fire NEITHER onend NOR onerror for some
+      // utterances, so a watchdog is required or the UI sticks in
+      // 'speaking' forever.
+      let utteranceFinished = false
+      let watchdogTimer: ReturnType<typeof setTimeout> | null = null
+      const clearWatchdog = (): void => {
+        if (watchdogTimer !== null) {
+          clearTimeout(watchdogTimer)
+          watchdogTimer = null
+        }
+      }
+      const finishUtterance = (): void => {
+        if (utteranceFinished) return
+        utteranceFinished = true
+        clearWatchdog()
+        // Race fix: a barge-in (onPttStart/tts_stop) calls
+        // speechSynthesis.cancel(), which fires onerror asynchronously —
+        // possibly after the backend has already broadcast the new turn's
+        // 'listening' state. Only stomp anim state back to idle if it's
+        // still 'speaking'; otherwise this would clobber 'listening' back
+        // to 'idle'. speech_done is still sent unconditionally — the
+        // backend treats it as monitor-drain re-enable and duplicates are
+        // harmless.
+        if (animStateRef.current === 'speaking') {
+          handleEvent({ type: 'state', state: 'idle' })
+        }
         sendRef.current?.({ type: 'speech_done' })
       }
-      utterance.onerror = () => {
-        handleEvent({ type: 'state', state: 'idle' })
-        sendRef.current?.({ type: 'speech_done' })
-      }
+
+      utterance.onend = () => finishUtterance()
+      utterance.onerror = () => finishUtterance()
+
+      const wordCount = event.text.trim().split(/\s+/).filter(Boolean).length
+      const watchdogMs = Math.min(60_000, wordCount * 400 + 5000)
+      watchdogTimer = setTimeout(() => {
+        watchdogTimer = null
+        window.speechSynthesis.cancel()
+        finishUtterance()
+      }, watchdogMs)
+
       window.speechSynthesis.speak(utterance)
       return
     }
@@ -83,7 +164,13 @@ export default function App(): JSX.Element {
         handleEvent({ type: 'state', state: 'idle' })
         return
       }
-      const audioData = event.data as unknown as ArrayBuffer
+      const rawFrame = event.data as unknown as ArrayBuffer
+      const { turnId: frameTurnId, payload: audioData } = parseAudioFrame(rawFrame)
+      if (frameTurnId !== 0 && frameTurnId !== lastTurnIdRef.current) {
+        // Stale frame from a cancelled turn — drop silently: no playback,
+        // no state change, no speech_done.
+        return
+      }
       const blob = new Blob([audioData], { type: 'audio/mpeg' })
       const url = URL.createObjectURL(blob)
       const audio = new Audio(url)
@@ -112,29 +199,85 @@ export default function App(): JSX.Element {
         console.error('[meter] tts meter error:', err)
       }
 
-      const cleanup = (): void => {
+      // Resource teardown (meter raf loop, AudioContext, blob URL, active-audio
+      // ref) shared by both the normal end-of-speech path and a barge-in.
+      // Idempotent: onended/onerror/a failed doPlay()/tts_stop can each try
+      // to run it for the same playback attempt.
+      let resourcesCleaned = false
+      const cleanupResources = (): void => {
+        if (resourcesCleaned) return
+        resourcesCleaned = true
         cancelAnimationFrame(raf)
         void ctx?.close()
         setAmplitude(0)
-      }
-      audio.onended = () => {
         URL.revokeObjectURL(url)
-        cleanup()
         activeAudioRef.current = null
+      }
+
+      // Watchdog: guards against playback that never fires onended/onerror
+      // (e.g. a wedged decoder). Armed with a generous fallback immediately,
+      // then tightened to the real clip length once metadata loads.
+      // finishSpeech is idempotent, so a watchdog firing after a normal end
+      // is harmless — it just clears an already-cleared timer and no-ops.
+      let watchdogTimer: ReturnType<typeof setTimeout> | null = null
+      const clearWatchdog = (): void => {
+        if (watchdogTimer !== null) {
+          clearTimeout(watchdogTimer)
+          watchdogTimer = null
+        }
+      }
+
+      // Idempotent end-of-speech notification — cleans up resources AND tells
+      // the rest of the app playback is done (idle + speech_done). Guarded
+      // separately from cleanupResources so a barge-in can clean up without
+      // notifying.
+      let speechFinished = false
+      const finishSpeech = (): void => {
+        if (speechFinished) return
+        speechFinished = true
+        clearWatchdog()
+        cleanupResources()
         handleEvent({ type: 'state', state: 'idle' })
         sendRef.current?.({ type: 'speech_done' })
       }
+
+      // tts_stop variant: stop playback and free resources, but do not notify
+      // — the backend broadcasts `listening` right after tts_stop, and a
+      // speech_done here would double-report a turn the backend already
+      // knows was cancelled. Also flips the shared guard flag so a later
+      // onended/onerror from the now-paused element is a no-op.
+      const stopForBargeIn = (): void => {
+        if (speechFinished) return
+        speechFinished = true
+        clearWatchdog()
+        audio.pause()
+        cleanupResources()
+      }
+      activeSpeechRef.current = { stopForBargeIn }
+
+      audio.onended = () => finishSpeech()
+      audio.onerror = () => {
+        console.error('[audio] element error:', audio.error)
+        finishSpeech()
+      }
+      audio.onloadedmetadata = () => {
+        // Tighten the fallback once we know the real clip length.
+        if (Number.isFinite(audio.duration)) {
+          clearWatchdog()
+          watchdogTimer = setTimeout(() => finishSpeech(), audio.duration * 1000 + 3000)
+        }
+      }
+      // Fallback watchdog in case metadata never arrives (or duration stays
+      // non-finite, e.g. streamed/unknown-length media).
+      watchdogTimer = setTimeout(() => finishSpeech(), 30_000)
       const doPlay = async (): Promise<void> => {
         if (ctx?.state === 'suspended') await ctx.resume()
         await audio.play()
       }
       doPlay().catch(err => {
-        activeAudioRef.current = null
         const detail = err instanceof DOMException ? `${err.name}: ${err.message}` : String(err)
         console.error('[audio] playback error:', detail)
-        cleanup()
-        handleEvent({ type: 'state', state: 'idle' })
-        sendRef.current?.({ type: 'speech_done' })
+        finishSpeech()
       })
     }
   }, [handleEvent])
@@ -188,7 +331,6 @@ export default function App(): JSX.Element {
         activeAudioRef.current.pause()
         activeAudioRef.current.currentTime = 0
         activeAudioRef.current = null
-        sendRef.current?.({ type: 'speech_done' })
       }
       window.speechSynthesis.cancel()
       sendRef.current?.({ type: 'speech_done' })
@@ -199,9 +341,13 @@ export default function App(): JSX.Element {
     return () => { stopMeter() }
   }, [])
 
+  // Dashboard tab: pull usage + live system metrics, and refresh now-playing.
   useEffect(() => {
-    if (state.dashboardOpen) send({ type: 'get_usage' })
-  }, [state.dashboardOpen, send])
+    if (state.activeView !== 'dashboard') return
+    send({ type: 'get_usage' })
+    send({ type: 'get_dashboard' })
+    send({ type: 'spotify_refresh' })
+  }, [state.activeView, send])
 
   useEffect(() => {
     if (connected) send({ type: 'get_settings' })
@@ -261,31 +407,37 @@ export default function App(): JSX.Element {
   // Only block input while a request is in flight; typing while Jarvis is
   // speaking (or listening) is fine.
   const busy = state.anim === 'thinking'
+  const onChat = state.activeView === 'chat'
 
   return (
     <div style={{ width: '100vw', height: '100vh', background: '#05070e', position: 'relative', overflow: 'hidden' }} onDragOver={handleDragOver} onDrop={handleDrop}>
       <Backdrop />
-      <ParticleRing state={state.anim} amplitude={amplitude} />
+      <div className="orb-stage" data-compact={!onChat}>
+        <ParticleRing state={state.anim} amplitude={amplitude} />
+      </div>
       <div className="grid-bg" />
+      <CircuitFrame />
       <TitleBar />
+      <ViewTabs active={state.activeView} onChange={setView} />
       <ListeningIndicator state={state.anim} />
-      <HudOverlay
-        animState={state.anim}
-        tokensToday={state.tokensToday}
-        costToday={state.costToday}
-        model={state.model}
-        llmProvider={state.settings?.llmProvider ?? 'auto'}
-        onProviderChange={(provider) => send({ type: 'set_settings', settings: { llmProvider: provider } })}
-        onStatsClick={toggleDashboard}
-        textVisible={state.textVisible}
-        onToggleText={toggleTextVisible}
-        spotifyOpen={state.spotifyOpen}
-        githubOpen={state.githubOpen}
-        quietMode={state.quietMode}
-        onToggleSpotify={toggleSpotify}
-        onToggleGithub={toggleGithub}
-        onToggleQuietMode={() => send({ type: 'set_settings', settings: { quietMode: !state.quietMode } })}
-      />
+      {onChat && (
+        <HudOverlay
+          animState={state.anim}
+          tokensToday={state.tokensToday}
+          costToday={state.costToday}
+          model={state.model}
+          llmProvider={state.settings?.llmProvider ?? 'auto'}
+          onProviderChange={(provider) => send({ type: 'set_settings', settings: { llmProvider: provider } })}
+          textVisible={state.textVisible}
+          onToggleText={toggleTextVisible}
+          spotifyOpen={state.spotifyOpen}
+          githubOpen={state.githubOpen}
+          quietMode={state.quietMode}
+          onToggleSpotify={toggleSpotify}
+          onToggleGithub={toggleGithub}
+          onToggleQuietMode={() => send({ type: 'set_settings', settings: { quietMode: !state.quietMode } })}
+        />
+      )}
       <ErrorToast message={state.errorText} onDismiss={clearError} />
       <CompletionToast toasts={state.toasts} onDismiss={dismissToast} />
       {!connected && (() => {
@@ -311,19 +463,45 @@ export default function App(): JSX.Element {
           </div>
         )
       })()}
-      <Transcript history={state.history} streamingText={state.streamingText} visible={state.textVisible} />
-      <ImageAttachZone
-        imageAttached={state.imageAttached}
-        onAttach={(base64, mimeType) => {
-          send({ type: 'image_attach', imageBase64: base64, mimeType })
-          setImageAttached(true)
-        }}
-        onClear={() => setImageAttached(false)}
-      />
-      <TextInput
-        disabled={busy || !connected}
-        onSubmit={(text) => send({ type: 'command', text })}
-      />
+      {onChat && (
+        <>
+          <Transcript history={state.history} streamingText={state.streamingText} visible={state.textVisible} />
+          <ImageAttachZone
+            imageAttached={state.imageAttached}
+            onAttach={(base64, mimeType) => {
+              send({ type: 'image_attach', imageBase64: base64, mimeType })
+              setImageAttached(true)
+            }}
+            onClear={() => setImageAttached(false)}
+          />
+          <TextInput
+            disabled={busy || !connected}
+            onSubmit={(text) => send({ type: 'command', text })}
+          />
+        </>
+      )}
+      {state.activeView === 'dashboard' && (
+        <div className="stage-view no-drag">
+          <DashboardView
+            tokensToday={state.tokensToday}
+            costToday={state.costToday}
+            model={state.model}
+            provider={state.settings?.llmProvider ?? 'auto'}
+            connected={connected}
+            daily={state.usageDaily}
+            byModel={state.usageByModel}
+            nowPlaying={state.spotifyNowPlaying}
+            data={state.dashboard}
+            onOpenSettings={toggleSettings}
+            onClose={() => setView('chat')}
+          />
+        </div>
+      )}
+      {state.activeView === 'activity' && (
+        <div className="stage-view no-drag">
+          <ActivityView entries={state.activity} onClose={() => setView('chat')} />
+        </div>
+      )}
       {state.confirm && (
         <ConfirmCard
           action={state.confirm.action}
@@ -393,16 +571,6 @@ export default function App(): JSX.Element {
         />
       )}
       <AgentCards agents={state.agents} onClose={(id) => send({ type: 'agent_close', id })} />
-      <Dashboard
-        open={state.dashboardOpen}
-        onClose={toggleDashboard}
-        tokensToday={state.tokensToday}
-        costToday={state.costToday}
-        model={state.model}
-        daily={state.usageDaily}
-        byModel={state.usageByModel}
-        onOpenSettings={() => { toggleDashboard(); toggleSettings() }}
-      />
       <SettingsPanel
         open={state.settingsOpen}
         settings={state.settings}

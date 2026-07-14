@@ -332,6 +332,12 @@ export function getAllEntities(): Entity[] {
   }))
 }
 
+export function getEntityCount(): number {
+  if (!dbAvailable) return 0
+  const row = getDb().prepare('SELECT COUNT(*) AS n FROM entities').get() as { n: number }
+  return row?.n ?? 0
+}
+
 export function findMentionedEntities(text: string): Entity[] {
   const all = getAllEntities()
   const lower = text.toLowerCase()
@@ -348,9 +354,12 @@ export function findMentionedEntities(text: string): Entity[] {
 
 export function insertMemory(text: string, embedding: Float32Array): void {
   if (!dbAvailable) return
+  // Serialize ONLY this view's bytes. `Buffer.from(embedding.buffer)` would
+  // capture the entire backing ArrayBuffer (transformers.js often returns a
+  // subarray view into a larger pool), storing garbage and corrupting recall.
   getDb().prepare(`
     INSERT INTO memories (timestamp, text, embedding) VALUES (?, ?, ?)
-  `).run(Date.now(), text, Buffer.from(embedding.buffer))
+  `).run(Date.now(), text, Buffer.from(embedding.buffer, embedding.byteOffset, embedding.byteLength))
 }
 
 export function getAllMemories(): Array<{ id: number; text: string; timestamp: number; embedding: Float32Array }> {
@@ -362,6 +371,12 @@ export function getAllMemories(): Array<{ id: number; text: string; timestamp: n
     timestamp: r.timestamp,
     embedding: new Float32Array(r.embedding.buffer, r.embedding.byteOffset, r.embedding.length / 4),
   }))
+}
+
+export function getMemoryCount(): number {
+  if (!dbAvailable) return 0
+  const row = getDb().prepare('SELECT COUNT(*) AS n FROM memories').get() as { n: number }
+  return row?.n ?? 0
 }
 
 export function deleteMemory(id: number): void {

@@ -40,8 +40,11 @@
   --ov-text-mid:    rgba(180, 205, 225, 0.52);
   --ov-text-dim:    rgba(140, 170, 195, 0.26);
   --ov-separator:   rgba(120, 180, 220, 0.08);
-  --ov-radius:      14px;
-  --ov-shadow:      0 24px 70px rgba(0,0,0,0.72), 0 0 0 1px rgba(34,211,238,0.12), inset 0 1px 0 rgba(255,255,255,0.04);
+  --ov-radius:      16px;
+  /* Layered depth: long soft drop, a hairline cyan ring, a top inset highlight,
+     and a faint inner accent bloom so panels read as lit glass, not flat cards. */
+  --ov-shadow:      0 32px 80px -16px rgba(0,0,0,0.82), 0 0 0 1px rgba(34,211,238,0.10), inset 0 1px 0 rgba(255,255,255,0.055), inset 0 0 48px rgba(34,211,238,0.035);
+  --ov-shadow-hot:  0 32px 80px -14px rgba(0,0,0,0.85), 0 0 0 1px rgba(34,211,238,0.22), 0 0 40px -6px rgba(34,211,238,0.28), inset 0 1px 0 rgba(255,255,255,0.07);
 }
 
 /* ── Overlay animations ───────────────────────────────── */
@@ -65,6 +68,28 @@
 @keyframes statusPulse {
   0%, 100% { opacity: 0.5; }
   50%       { opacity: 1;   }
+}
+
+/* ── Signature reveal: information materializes from a point ──
+   MCU-style. A panel/card scales up from a small bright seed,
+   de-blurs, and settles. Stagger with inline animation-delay
+   for a coordinated "construct" effect across a grid. */
+@keyframes materialize {
+  0%   { opacity: 0; transform: scale(0.42); filter: blur(7px); }
+  55%  { opacity: 1; }
+  100% { opacity: 1; transform: scale(1); filter: blur(0); }
+}
+.materialize {
+  animation: materialize 0.28s cubic-bezier(0.16, 1, 0.3, 1) both;
+  transform-origin: center;
+  will-change: transform, opacity, filter;
+}
+/* For modals centered via translate(-50%,-50%) — keeps the centering offset
+   in every keyframe so the panel materializes in place rather than jumping. */
+@keyframes materializeCentered {
+  0%   { opacity: 0; transform: translate(-50%, -50%) scale(0.5);  filter: blur(7px); }
+  55%  { opacity: 1; }
+  100% { opacity: 1; transform: translate(-50%, -50%) scale(1);    filter: blur(0); }
 }
 @keyframes skeletonShimmer {
   0%   { background-position: -200px 0; }
@@ -108,9 +133,87 @@ input::placeholder, textarea::placeholder { color: rgba(160, 196, 220, 0.40); }
   background-image:
     linear-gradient(var(--accent-ghost) 1px, transparent 1px),
     linear-gradient(90deg, var(--accent-ghost) 1px, transparent 1px);
-  background-size: 48px 48px;
+  background-size: 44px 44px;
   -webkit-mask-image: radial-gradient(ellipse 85% 85% at 50% 50%, black 25%, transparent 100%);
   mask-image:         radial-gradient(ellipse 85% 85% at 50% 50%, black 25%, transparent 100%);
+  /* Slow electrical "breath" — the grid swells and dims almost imperceptibly. */
+  animation: gridBreath 9s ease-in-out infinite;
+}
+@keyframes gridBreath {
+  0%, 100% { opacity: 0.55; }
+  50%       { opacity: 0.9;  }
+}
+
+/* ── Circuit frame: PCB traces hugging the edges with a glowing
+   "current" pulse travelling along them. Atmosphere, kept faint. */
+.circuit-frame {
+  position: absolute;
+  inset: 0;
+  z-index: 1;
+  pointer-events: none;
+}
+.circuit-frame svg { width: 100%; height: 100%; display: block; }
+.circuit-trace {
+  fill: none;
+  stroke: rgba(var(--accent-rgb), 0.10);
+  stroke-width: 1;
+}
+.circuit-node {
+  fill: rgba(var(--accent-rgb), 0.22);
+}
+.circuit-pulse {
+  fill: none;
+  stroke: var(--accent);
+  stroke-width: 1.6;
+  stroke-linecap: round;
+  filter: drop-shadow(0 0 5px rgba(var(--accent-rgb), 0.9));
+  stroke-dasharray: 70 4000;
+  animation: circuitFlow 10s linear infinite;
+}
+.circuit-pulse--b {
+  stroke: var(--amber);
+  filter: drop-shadow(0 0 5px rgba(var(--amber-rgb), 0.8));
+  animation: circuitFlow 14s linear infinite;
+  animation-delay: -5s;
+}
+@keyframes circuitFlow {
+  to { stroke-dashoffset: -4070; }
+}
+
+/* ── Orb stage: shrinks the particle ring into a persistent corner
+   "reactor" when a non-chat tab is active. Transforming the full-size
+   stage (not resizing the canvas) keeps the render crisp. ── */
+.orb-stage {
+  position: absolute;
+  inset: 0;
+  z-index: 0;
+  /* Purely visual — never intercept clicks, so it can float over a tab's
+     content without blocking it. */
+  pointer-events: none;
+  transform-origin: 0% 100%;
+  transition: transform 0.55s cubic-bezier(0.16, 1, 0.3, 1), z-index 0s;
+}
+/* Minimized: a small persistent "reactor" anchored in the bottom-left corner,
+   floating above the tab content (but below the title bar / tabs). */
+.orb-stage[data-compact="true"] {
+  z-index: 60;
+  transform: translate(30px, -30px) scale(0.3);
+}
+@media (prefers-reduced-motion: reduce) {
+  .orb-stage { transition: none; }
+}
+
+/* ── Tab stage view: fills the main area for Dashboard / Activity ── */
+.stage-view {
+  position: absolute;
+  top: 52px;
+  left: 50%;
+  transform: translateX(-50%);
+  width: min(1100px, 92vw);
+  height: calc(100vh - 96px);
+  z-index: 40;
+  overflow-y: auto;
+  padding: 8px 4px 24px;
 }
 
 /* ── Dashboard animation ──────────────────────────────── */
@@ -184,53 +287,92 @@ input::placeholder, textarea::placeholder { color: rgba(160, 196, 220, 0.40); }
 
 /* ── Pill buttons ─────────────────────────────────────── */
 
+/* Tactical HUD buttons — squared, not pills. Each carries a lit accent "rail"
+   on its left edge and a notch tick top-right, reads uppercase mono, and
+   ignites (rail glows, surface lifts) on hover. Class name kept for drop-in
+   compatibility across the app; the look is deliberately un-pill. */
 .pill-btn {
-  background: rgba(var(--accent-rgb), 0.07);
-  border: 1px solid rgba(var(--accent-rgb), 0.22);
-  border-radius: 20px;
+  position: relative;
+  background: linear-gradient(180deg, rgba(var(--accent-rgb), 0.10), rgba(var(--accent-rgb), 0.03));
+  border: 1px solid rgba(var(--accent-rgb), 0.26);
+  border-radius: 2px;
   color: var(--accent);
   cursor: pointer;
   font-family: var(--font-hud);
   font-size: 10px;
-  letter-spacing: 0.12em;
-  padding: 5px 14px;
-  transition: background 0.15s, border-color 0.15s, box-shadow 0.15s;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  padding: 6px 15px;
+  transition: background 0.15s, border-color 0.15s, box-shadow 0.15s, color 0.15s;
+}
+/* Left rail */
+.pill-btn::before {
+  content: '';
+  position: absolute;
+  left: -1px; top: 2px; bottom: 2px;
+  width: 2px;
+  background: var(--accent);
+  opacity: 0.42;
+  transition: opacity 0.15s, box-shadow 0.15s;
+}
+/* Top-right corner tick */
+.pill-btn::after {
+  content: '';
+  position: absolute;
+  top: 3px; right: 3px;
+  width: 5px; height: 5px;
+  border-top: 1px solid rgba(var(--accent-rgb), 0.5);
+  border-right: 1px solid rgba(var(--accent-rgb), 0.5);
+  opacity: 0.6;
+  transition: opacity 0.15s;
 }
 .pill-btn:hover {
-  background: rgba(var(--accent-rgb), 0.14);
-  border-color: rgba(var(--accent-rgb), 0.45);
-  box-shadow: 0 0 14px rgba(var(--accent-rgb), 0.18);
+  background: linear-gradient(180deg, rgba(var(--accent-rgb), 0.20), rgba(var(--accent-rgb), 0.07));
+  border-color: rgba(var(--accent-rgb), 0.6);
+  color: #d9fbff;
+  box-shadow: 0 0 16px rgba(var(--accent-rgb), 0.20), inset 0 0 14px rgba(var(--accent-rgb), 0.06);
 }
+.pill-btn:hover::before { opacity: 1; box-shadow: 0 0 8px var(--accent); }
+.pill-btn:hover::after  { opacity: 1; }
 .pill-btn:disabled {
-  opacity: 0.4;
+  opacity: 0.35;
   cursor: default;
 }
+.pill-btn:disabled::before { opacity: 0.2; box-shadow: none; }
 .pill-btn--sm {
-  padding: 3px 10px;
+  padding: 4px 11px;
   font-size: 9px;
 }
 .pill-btn--icon {
-  padding: 5px 10px;
-  min-width: 32px;
+  padding: 6px 10px;
+  min-width: 34px;
   text-align: center;
+  letter-spacing: 0;
 }
 .pill-btn--active {
-  background: var(--ov-accent-dim);
+  background: linear-gradient(180deg, rgba(var(--accent-rgb), 0.26), rgba(var(--accent-rgb), 0.11));
   border-color: var(--ov-border-hot);
-  color: var(--ov-accent);
-  box-shadow: 0 0 8px var(--ov-accent-glow);
+  color: #eaffff;
+  box-shadow: 0 0 14px var(--ov-accent-glow), inset 0 0 14px rgba(var(--accent-rgb), 0.10);
 }
+.pill-btn--active::before { opacity: 1; box-shadow: 0 0 8px var(--accent); }
 .pill-btn--active:hover {
-  background: var(--ov-accent-dim);
   border-color: var(--ov-border-hot);
 }
 .pill-btn--danger {
+  background: linear-gradient(180deg, rgba(239, 68, 68, 0.10), rgba(239, 68, 68, 0.03));
   border-color: rgba(239, 68, 68, 0.4);
-  color: #ef4444;
+  color: #f87171;
 }
+.pill-btn--danger::before { background: #ef4444; }
+.pill-btn--danger::after  { border-color: rgba(239, 68, 68, 0.5); }
 .pill-btn--danger:hover {
-  background: rgba(239, 68, 68, 0.1);
+  background: linear-gradient(180deg, rgba(239, 68, 68, 0.18), rgba(239, 68, 68, 0.06));
+  border-color: rgba(239, 68, 68, 0.65);
+  color: #fca5a5;
+  box-shadow: 0 0 16px rgba(239, 68, 68, 0.18);
 }
+.pill-btn--danger:hover::before { box-shadow: 0 0 8px #ef4444; }
 
 /* ── Overlay input ────────────────────────────────────── */
 
@@ -336,5 +478,7 @@ input::placeholder, textarea::placeholder { color: rgba(160, 196, 220, 0.40); }
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .bd-aurora, .bd-hud--spin, .bd-hud--spin-r { animation: none; }
+  .bd-aurora, .bd-hud--spin, .bd-hud--spin-r,
+  .grid-bg, .circuit-pulse, .circuit-pulse--b { animation: none; }
+  .materialize { animation-duration: 0.001s; filter: none; }
 }

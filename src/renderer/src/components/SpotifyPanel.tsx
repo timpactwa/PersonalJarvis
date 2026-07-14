@@ -3,7 +3,7 @@ import type { RendererEvent } from '../../../backend/types'
 
 interface Props {
   onClose: () => void
-  nowPlaying: { track?: string; artist?: string; isPlaying: boolean } | null
+  nowPlaying: { track?: string; artist?: string; isPlaying: boolean; albumArt?: string } | null
   send: (event: RendererEvent) => void
 }
 
@@ -43,13 +43,13 @@ export function SpotifyPanel({ onClose, nowPlaying, send }: Props): JSX.Element 
         left: '50%',
         transform: 'translate(-50%, -50%)',
         zIndex: 200,
-        width: 460,
+        width: 560,
         background: 'var(--ov-bg)',
         border: '1px solid var(--ov-border)',
         borderRadius: 'var(--ov-radius)',
-        boxShadow: 'var(--ov-shadow)',
-        padding: '20px 24px',
-        animation: 'overlayIn 0.22s cubic-bezier(0.16,1,0.3,1) forwards',
+        boxShadow: 'var(--ov-shadow-hot)',
+        padding: '22px 26px',
+        animation: 'materializeCentered 0.28s cubic-bezier(0.16,1,0.3,1) both',
       }}
     >
       {/* Header */}
@@ -82,43 +82,73 @@ export function SpotifyPanel({ onClose, nowPlaying, send }: Props): JSX.Element 
       {/* Now-playing card */}
       <div
         style={{
-          marginTop: 16,
+          marginTop: 18,
           background: 'var(--ov-bg-raised)',
-          borderRadius: 10,
-          padding: 16,
+          borderRadius: 12,
+          padding: 18,
           border: '1px solid var(--ov-separator)',
         }}
       >
         {isLoading ? (
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-            <div className="skeleton-row" style={{ width: '70%' }} />
-            <div className="skeleton-row" style={{ width: '45%' }} />
-          </div>
-        ) : isPlaying ? (
-          <div style={{ display: 'flex', alignItems: 'center', gap: 14 }}>
-            {/* Album art placeholder */}
-            <div
-              style={{
-                width: 56,
-                height: 56,
-                flexShrink: 0,
-                background: 'linear-gradient(135deg, var(--ov-accent-dim), rgba(14,165,233,0.04))',
-                border: '1px solid var(--ov-border)',
-                borderRadius: 8,
-                display: 'flex',
-                alignItems: 'center',
-                justifyContent: 'center',
-                fontSize: 20,
-                color: 'var(--ov-text-dim)',
-              }}
-            >
-              {'♪'}
+          <div style={{ display: 'flex', gap: 16 }}>
+            <div className="skeleton-row" style={{ width: 104, height: 104, borderRadius: 8 }} />
+            <div style={{ flex: 1, display: 'flex', flexDirection: 'column', gap: 10, justifyContent: 'center' }}>
+              <div className="skeleton-row" style={{ width: '70%' }} />
+              <div className="skeleton-row" style={{ width: '45%' }} />
             </div>
+          </div>
+        ) : nowPlaying?.track ? (
+          <div style={{ display: 'flex', alignItems: 'center', gap: 18 }}>
+            {/* Album art */}
+            {nowPlaying.albumArt ? (
+              <img
+                src={nowPlaying.albumArt}
+                alt=""
+                style={{
+                  width: 104,
+                  height: 104,
+                  flexShrink: 0,
+                  borderRadius: 8,
+                  objectFit: 'cover',
+                  border: '1px solid var(--ov-border)',
+                  boxShadow: '0 8px 28px rgba(0,0,0,0.5)',
+                }}
+              />
+            ) : (
+              <div
+                style={{
+                  width: 104,
+                  height: 104,
+                  flexShrink: 0,
+                  background: 'linear-gradient(135deg, var(--ov-accent-dim), rgba(14,165,233,0.04))',
+                  border: '1px solid var(--ov-border)',
+                  borderRadius: 8,
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  fontSize: 34,
+                  color: 'var(--ov-text-dim)',
+                }}
+              >
+                {'♪'}
+              </div>
+            )}
             {/* Track info */}
             <div style={{ flex: 1, overflow: 'hidden' }}>
               <div
                 style={{
-                  fontSize: 15,
+                  fontSize: 10,
+                  fontFamily: 'var(--font-hud)',
+                  letterSpacing: '0.16em',
+                  color: isPlaying ? 'var(--ov-accent)' : 'var(--ov-text-dim)',
+                  marginBottom: 8,
+                }}
+              >
+                {isPlaying ? '● NOW PLAYING' : '❙❙ PAUSED'}
+              </div>
+              <div
+                style={{
+                  fontSize: 18,
                   fontWeight: 600,
                   color: 'var(--ov-text)',
                   whiteSpace: 'nowrap',
@@ -126,36 +156,19 @@ export function SpotifyPanel({ onClose, nowPlaying, send }: Props): JSX.Element 
                   textOverflow: 'ellipsis',
                 }}
               >
-                {nowPlaying?.track ?? 'Unknown track'}
+                {nowPlaying.track}
               </div>
               <div
                 style={{
-                  fontSize: 11,
+                  fontSize: 12,
                   color: 'var(--ov-text-mid)',
-                  marginTop: 3,
+                  marginTop: 4,
                   whiteSpace: 'nowrap',
                   overflow: 'hidden',
                   textOverflow: 'ellipsis',
                 }}
               >
-                {nowPlaying?.artist ?? 'Unknown artist'}
-              </div>
-              <div
-                style={{
-                  marginTop: 8,
-                  height: 2,
-                  background: 'var(--ov-separator)',
-                  borderRadius: 2,
-                }}
-              >
-                <div
-                  style={{
-                    width: '38%',
-                    height: '100%',
-                    background: 'var(--ov-accent)',
-                    borderRadius: 2,
-                  }}
-                />
+                {nowPlaying.artist ?? 'Unknown artist'}
               </div>
             </div>
           </div>
@@ -163,9 +176,9 @@ export function SpotifyPanel({ onClose, nowPlaying, send }: Props): JSX.Element 
           <div
             style={{
               textAlign: 'center',
-              fontSize: 11,
+              fontSize: 12,
               color: 'var(--ov-text-dim)',
-              padding: '8px 0',
+              padding: '24px 0',
             }}
           >
             Nothing playing

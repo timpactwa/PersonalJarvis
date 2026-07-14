@@ -15,13 +15,13 @@ export const jarvisToolDefs: JarvisToolDef[] = [
   {
     name: 'jarvis_get_settings',
     description:
-      'Read all Jarvis configuration: LLM provider, voice, hotkey, memory depth, Ollama model, and user profile. Use when the user asks about current settings, what mode Jarvis is in, or how Jarvis is configured. Never use web_search for this.',
+      'Reads and returns YOUR OWN (Jarvis\'s) current configuration: active LLM provider, Claude model preference, voice, push-to-talk hotkey, memory depth, Ollama model, user profile, and which background monitors are on. Use when the user asks about how Jarvis is set up, "what mode are you in?", "which model are you using?", or "what are my settings?". Never web_search this — it is local config. Do NOT use for usage/cost stats (use jarvis_get_usage).',
     input_schema: { type: 'object', properties: {}, required: [] },
   },
   {
     name: 'jarvis_set_settings',
     description:
-      'Change Jarvis settings. Use when the user asks to switch LLM provider, change voice, update their profile, adjust memory depth, or change the push-to-talk hotkey. Only pass fields the user wants to change.',
+      'Changes one or more of YOUR OWN (Jarvis\'s) settings. Use when the user asks to switch LLM provider, change the voice, update their profile, adjust memory depth, change the push-to-talk or screenshot hotkey, toggle quiet mode, or enable/disable a background monitor. Pass ONLY the fields the user wants to change — omitted fields are left untouched.',
     input_schema: {
       type: 'object',
       properties: {
@@ -58,7 +58,7 @@ export const jarvisToolDefs: JarvisToolDef[] = [
   {
     name: 'jarvis_open_panel',
     description:
-      'Open the Spotify or GitHub dashboard panel in the Jarvis UI. Use when the user says "show me Spotify", "pull up GitHub", "open my GitHub dashboard", "show my repos", "show my music", or any request to visually see these services — not just get text info.',
+      'Opens the on-screen Spotify or GitHub visual panel in the Jarvis overlay. Use when the user wants to SEE the panel itself, e.g. "show me Spotify", "pull up GitHub", "open my GitHub dashboard", "show my repos", "show my music". Do NOT use when the user just wants an action or an answer — e.g. "what\'s playing?" is spotify_current, "play music" is spotify_play, "list my PRs" is github_pr_list.',
     input_schema: {
       type: 'object',
       properties: {
@@ -70,11 +70,11 @@ export const jarvisToolDefs: JarvisToolDef[] = [
   {
     name: 'jarvis_get_usage',
     description:
-      'Get API usage stats, token counts, tracked costs, and provider info. Use when the user asks how much they are spending, token usage, rate limits, or cost to talk for a period. Never use web_search for Jarvis usage questions.',
+      'Returns Jarvis\'s own API usage stats: token counts, locally tracked costs, per-model breakdown, and the active provider, over a recent window. Use when the user asks how much they have spent on Jarvis, their token usage, how much a chat costs, or about provider rate limits. This is local self-reporting — never web_search it. Do NOT use for configuration (use jarvis_get_settings).',
     input_schema: {
       type: 'object',
       properties: {
-        days: { type: 'number', description: 'Days of history to include (default 7, max 30).' },
+        days: { type: 'number', description: 'Number of days of usage history to include (default 7, max 30).' },
       },
       required: [],
     },
@@ -82,12 +82,12 @@ export const jarvisToolDefs: JarvisToolDef[] = [
   {
     name: 'jarvis_remind',
     description:
-      'Set a reminder that Jarvis will speak aloud at a future time. Use when the user says "remind me", "set a reminder", "tell me at X", or "in N minutes tell me Y". The text parameter is what Jarvis will say when the reminder fires.',
+      'Schedules a one-time spoken reminder that Jarvis will say aloud at a specific future time. Use when the user says "remind me to X", "set a reminder", "in N minutes tell me Y", or "at 5pm remind me to Z". Do NOT use for calendar appointments the user wants on Google Calendar (use calendar_create). Requires the custom-reminders monitor to be enabled (it is by default).',
     input_schema: {
       type: 'object' as const,
       properties: {
-        text:    { type: 'string', description: 'What Jarvis will say when the reminder fires (e.g. "take a break")' },
-        fire_at: { type: 'string', description: 'When to fire: ISO 8601 ("2026-06-12T17:00:00"), relative ("in 30 minutes", "in 2 hours"), or time-of-day ("at 5pm", "at 2:30pm")' },
+        text:    { type: 'string', description: 'The exact message Jarvis will speak when the reminder fires, e.g. "take a break" or "call mom".' },
+        fire_at: { type: 'string', description: 'When the reminder should fire. Accepts ISO 8601 ("2026-06-12T17:00:00"), relative offsets ("in 30 minutes", "in 2 hours"), or a time of day ("at 5pm", "at 2:30pm"). Times of day resolve to today, or tomorrow if already past.' },
       },
       required: ['text', 'fire_at'],
     },

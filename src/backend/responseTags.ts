@@ -61,7 +61,7 @@ export function stripResponseTags(raw: string): {
     text = text.replace(tag[0], '').trim()
   }
 
-  if (!text && (pendingMemory || pendingEntities.length > 0)) {
+  if (!text && (pendingMemory || pendingEntities.length > 0 || pendingReport)) {
     if (pendingEntities.length === 1) {
       const e = pendingEntities[0]
       text = e.email
@@ -69,6 +69,8 @@ export function stripResponseTags(raw: string): {
         : `I'll remember ${e.name}.`
     } else if (pendingEntities.length > 1) {
       text = `Got it — I've saved ${pendingEntities.map(e => e.name).join(', ')}.`
+    } else if (pendingReport && !pendingMemory) {
+      text = 'Report ready.'
     } else {
       text = 'Noted.'
     }

@@ -11,6 +11,23 @@ let uiohookLoaded = false
 let mKeyDown = false
 let lastMKeydownAt = 0
 let pttStartedAt = 0
+let maxHoldTimer: NodeJS.Timeout | null = null
+// Which physical key triggers PTT. In uiohook mode this is a UiohookKey
+// keycode (set once UiohookKey is known, see the require() below); in
+// fallback mode it's unused — fallbackAccel below is what matters there.
+let pttKeycode = 0
+// Currently-registered fallback (no-uiohook) globalShortcut accelerator, so
+// set-hotkey can unregister the old one and register the new one.
+let fallbackAccel = 'Alt+Space'
+
+// A real hold rarely runs past this. If we're still "down" here, a keyup was
+// almost certainly missed (uiohook drops modifier keyups on Windows now and
+// then) — auto-stop so the state can never wedge true and kill all later PTT.
+const MAX_HOLD_MS = 30_000
+// A fresh keydown this long after the last one can't be auto-repeat (those
+// arrive ~30-50ms apart). If mKeyDown is still true at that point, the prior
+// keyup was missed — treat the press as a brand-new recording, not a rescue.
+const STALE_DOWN_MS = 1_500
 
 function sendToBackend(msg: { type: string }): void {
   if (!backendProcess) return
@@ -26,6 +43,8 @@ function startPtt(): void {
   mKeyDown = true
   pttStartedAt = Date.now()
   lastMKeydownAt = Date.now()
+  if (maxHoldTimer) clearTimeout(maxHoldTimer)
+  maxHoldTimer = setTimeout(() => stopPtt('max-hold watchdog'), MAX_HOLD_MS)
   console.log('[main] ptt-start')
   sendToBackend({ type: 'ptt-start' })
   sendToRenderer('ptt-start')
@@ -34,6 +53,10 @@ function startPtt(): void {
 function stopPtt(reason: string): void {
   if (!mKeyDown) return
   mKeyDown = false
+  if (maxHoldTimer) {
+    clearTimeout(maxHoldTimer)
+    maxHoldTimer = null
+  }
   const heldMs = Date.now() - pttStartedAt
   console.log(`[main] ptt-stop (${reason}) held=${heldMs}ms`)
   // Sub-150ms is an accidental tap, not speech — cancel. (The capture stream
@@ -45,6 +68,15 @@ function stopPtt(reason: string): void {
     sendToBackend({ type: 'ptt-stop' })
   }
   sendToRenderer('ptt-stop')
+}
+
+// Fallback (no-uiohook) PTT handler: a single globalShortcut accelerator has
+// no separate keydown/keyup, so it toggles through the same startPtt/stopPtt
+// funnel the uiohook path uses. Two distinct presses naturally satisfy
+// stopPtt's 150ms min-hold cancel-vs-send threshold.
+function fallbackToggleHandler(): void {
+  if (mKeyDown) stopPtt('fallback-toggle')
+  else startPtt()
 }
 
 // Safely send an IPC message to the renderer. After a reload/crash the frame may
@@ -70,10 +102,33 @@ try {
   uIOhook = mod.uIOhook
   UiohookKey = mod.UiohookKey
   uiohookLoaded = true
+  pttKeycode = UiohookKey.AltRight
   console.log('[main] uiohook-napi loaded — hold-to-talk available')
 } catch (err) {
   console.log('[main] uiohook-napi not available — falling back to Alt+Space toggle:', err)
 }
+
+// set-hotkey allowlist for uiohook mode: accelerator string (as sent by the
+// renderer) -> UiohookKey keycode. Only keys that uiohook-napi actually
+// exports as named constants are included (checked against
+// node_modules/uiohook-napi/dist/index.d.ts — there is no UiohookKey.Pause,
+// so that one is intentionally omitted rather than referencing undefined).
+// Built lazily (only evaluated when uiohookLoaded) so it never touches
+// UiohookKey while it's still null in fallback mode.
+const PTT_KEY_ALLOWLIST: Record<string, number> = uiohookLoaded ? {
+  RightAlt: UiohookKey.AltRight,
+  AltRight: UiohookKey.AltRight,
+  RightCtrl: UiohookKey.CtrlRight,
+  CtrlRight: UiohookKey.CtrlRight,
+  F13: UiohookKey.F13,
+  F14: UiohookKey.F14,
+  F15: UiohookKey.F15,
+  F16: UiohookKey.F16,
+  F17: UiohookKey.F17,
+  F18: UiohookKey.F18,
+  F19: UiohookKey.F19,
+  ScrollLock: UiohookKey.ScrollLock,
+} : {}
 
 const BACKEND_READY_TIMEOUT_MS = 20_000
 const BACKEND_MAX_RESTARTS = 3
@@ -265,6 +320,8 @@ function createWindow(): void {
     })
 }
 
+app.commandLine.appendSwitch('autoplay-policy', 'no-user-gesture-required')
+
 app.whenReady().then(() => {
   createWindow()
 
@@ -278,32 +335,38 @@ app.whenReady().then(() => {
     // Hold-to-talk via global hook. If keyup is missed, a later M press (after a
     // gap longer than auto-repeat) acts as a rescue stop instead of being ignored.
     uIOhook.on('keydown', (e: any) => {
-      if (e.keycode !== UiohookKey.AltRight) return
+      if (e.keycode !== pttKeycode) return
       const now = Date.now()
       if (!mKeyDown) {
         startPtt()
         return
       }
-      // Auto-repeat keydowns arrive ~30-50ms apart while held — ignore those.
-      // 2000ms threshold: games/OS can emit spurious M keydowns ~300ms after the real one.
-      if (now - lastMKeydownAt > 2000) {
-        console.log('[main] M keydown while already recording — treating as rescue stop')
-        stopPtt('M toggle rescue')
+      // Already "down". Auto-repeat keydowns arrive ~30-50ms apart while held —
+      // ignore those. But a press this long after the last keydown can't be
+      // auto-repeat, which means the previous keyup was missed and mKeyDown is
+      // stale. Recover by resetting and starting a FRESH recording — otherwise
+      // the stuck flag silently swallows every later press (the "can't talk
+      // after one message" bug).
+      if (now - lastMKeydownAt > STALE_DOWN_MS) {
+        console.log('[main] PTT keydown while stale — missed keyup, restarting recording')
+        mKeyDown = false
+        if (maxHoldTimer) { clearTimeout(maxHoldTimer); maxHoldTimer = null }
+        sendToBackend({ type: 'ptt-cancel' })
+        startPtt()
+        return
       }
       lastMKeydownAt = now
     })
     uIOhook.on('keyup', (e: any) => {
-      if (e.keycode === UiohookKey.AltRight) stopPtt('M keyup')
+      if (e.keycode === pttKeycode) stopPtt('M keyup')
     })
     uIOhook.start()
     console.log('[main] uiohook started — hold Right Alt to talk, release to stop (Escape cancels)')
   } else {
-    // Fallback: Alt+Space toggle via globalShortcut
-    globalShortcut.register('Alt+Space', () => {
-      console.log('[main] Alt+Space → ptt-start (toggle)')
-      sendToRenderer('ptt-start')
-    })
-    console.log('[main] globalShortcut registered — Alt+Space to toggle recording')
+    // Fallback: toggle via globalShortcut, routed through the same
+    // startPtt/stopPtt funnel the uiohook path uses (see fallbackToggleHandler).
+    globalShortcut.register(fallbackAccel, fallbackToggleHandler)
+    console.log(`[main] globalShortcut registered — ${fallbackAccel} to toggle recording`)
   }
 
   // Screenshot hotkey — captures the primary screen and ships it to the
@@ -328,7 +391,54 @@ app.whenReady().then(() => {
   globalShortcut.register(screenshotHotkeyStr, screenshotHandler)
   console.log(`[main] screenshot hotkey registered — ${screenshotHotkeyStr}`)
 
-  ipcMain.on('set-hotkey', (_e, _accelerator: string) => { /* reserved */ })
+  // Live PTT hotkey change from the renderer settings UI. Behavior differs
+  // by mode: uiohook mode just needs the comparison keycode updated (the
+  // global hook itself never changes); fallback mode needs the globalShortcut
+  // accelerator swapped.
+  ipcMain.on('set-hotkey', (_e, accelerator: string) => {
+    if (uiohookLoaded) {
+      const mapped = PTT_KEY_ALLOWLIST[accelerator]
+      if (mapped === undefined) {
+        console.error('[main] set-hotkey: unmappable accelerator, keeping current PTT key:', accelerator)
+        return
+      }
+      pttKeycode = mapped
+      console.log('[main] PTT hotkey updated to:', accelerator)
+    } else {
+      const oldAccel = fallbackAccel
+      globalShortcut.unregister(oldAccel)
+      // register() returns false for valid-but-unavailable accelerators (e.g.
+      // taken by another app) and throws for malformed ones — handle both, and
+      // always leave SOME working PTT key registered.
+      let registered = false
+      try {
+        registered = globalShortcut.register(accelerator, fallbackToggleHandler)
+      } catch (err) {
+        console.error('[main] set-hotkey: malformed accelerator:', accelerator, err)
+      }
+      if (registered) {
+        fallbackAccel = accelerator
+        console.log('[main] fallback PTT hotkey updated to:', accelerator)
+      } else {
+        console.error('[main] failed to register fallback PTT hotkey, reverting to previous:', accelerator)
+        try {
+          if (!globalShortcut.register(oldAccel, fallbackToggleHandler)) {
+            console.error('[main] failed to re-register previous fallback PTT hotkey:', oldAccel)
+          }
+        } catch (err2) {
+          console.error('[main] failed to re-register previous fallback PTT hotkey:', oldAccel, err2)
+        }
+      }
+    }
+  })
+  // Voice-triggered screenshot: the backend's jarvis_screenshot tool emits a
+  // screenshot_request event, the renderer forwards it here, and the capture
+  // flows back via the same screenshot-captured IPC the hotkey path uses.
+  ipcMain.on('trigger-screenshot', () => {
+    void screenshotHandler().catch(err => {
+      console.error('[main] trigger-screenshot error:', err)
+    })
+  })
   ipcMain.on('set-screenshot-hotkey', (_e, newHotkey: string) => {
     globalShortcut.unregister(screenshotHotkeyStr)
     screenshotHotkeyStr = newHotkey
@@ -346,6 +456,10 @@ app.whenReady().then(() => {
     else mainWindow.maximize()
   })
   ipcMain.on('window-close', () => mainWindow?.close())
+  ipcMain.on('relaunch', () => {
+    app.relaunch()
+    app.exit(0)
+  })
 
   app.on('activate', () => {
     if (BrowserWindow.getAllWindows().length === 0) createWindow()

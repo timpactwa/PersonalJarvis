@@ -1,4 +1,4 @@
-import { google } from 'googleapis'
+import { google } from '../tools/googleClient'
 import { getAuthorizedClient } from '../tools/gmail'
 import { getSettings } from '../memory/settings'
 import type { Alert, EnqueueFn, RegisterFn } from './index'
@@ -57,7 +57,7 @@ export function startCalendarMonitor(enqueue: EnqueueFn, register: RegisterFn): 
     if (!getSettings().monitorCalendar) return
     try {
       const auth = await getAuthorizedClient()
-      const calendar = google.calendar({ version: 'v3', auth })
+      const calendar = google().calendar({ version: 'v3', auth })
       const now = new Date()
       const timeMax = new Date(Date.now() + 60 * 60_000)
       const res = await calendar.events.list({

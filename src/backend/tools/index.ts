@@ -10,10 +10,32 @@ import { commandToolDefs, handleCommandTool } from './commands'
 import { visionToolDefs, handleVisionTool } from './vision'
 import { githubToolDefs, handleGithubTool } from './github'
 import { spotifyToolDefs, handleSpotifyTool } from './spotify'
+import { capabilityToolDefs, handleCapabilityTool } from './capabilities'
 import { insertUserEvent } from '../memory/db'
 import { isExplicitEmailComposeRequest } from '../toolGuards'
 import { emitEvent } from '../events'
+import { describeTool, summarizeArgs } from './describe'
+import { awaitApproval } from '../confirm'
+import { setAwaitingApproval } from '../turnManager'
 import type { Tool } from '@anthropic-ai/sdk/resources'
+
+// Tools that mutate real state and therefore require an explicit user
+// approval before they run. This is the ONE gate — it sits in handleTool
+// (the shared choke point every provider's tool loop calls through), so
+// Groq/Ollama/Claude all get the same confirmation, exactly once.
+const DESTRUCTIVE = new Set(['fs_write', 'execute_file'])
+
+// Short, human-readable action labels for the ConfirmCard. describeTool()'s
+// fs_ prefix fallback ("Accessing files") is written for the Activity log,
+// not an approval prompt, so destructive tools get their own literal here.
+const APPROVAL_ACTION_LABEL: Record<string, string> = {
+  fs_write: 'Write file',
+  execute_file: 'Run file',
+}
+
+function approvalDetail(input: Record<string, unknown>): string {
+  return typeof input.path === 'string' && input.path ? input.path : summarizeArgs(input)
+}
 
 export function getTools(): Tool[] {
   return [
@@ -30,11 +52,13 @@ export function getTools(): Tool[] {
     ...visionToolDefs,
     ...githubToolDefs,
     ...spotifyToolDefs,
+    ...capabilityToolDefs,
   ] as Tool[]
 }
 
-// Tools for Groq — excludes execute_file (requires confirmation gate).
-// gmail_compose and gmail_browse are safe (non-destructive, UI-only).
+// Tools for Groq — still excludes execute_file as a capability choice (the
+// destructive gate in handleTool would cover it now, but script execution is
+// kept Claude-only). gmail_compose and gmail_browse are safe (UI-only).
 export function getToolsForGroq(): Tool[] {
   return [
     ...filesystemToolDefs,
@@ -48,6 +72,7 @@ export function getToolsForGroq(): Tool[] {
     ...visionToolDefs,
     ...(githubToolDefs.filter((t: { name: string }) => t.name !== 'github_pr_describe') as Tool[]),
     ...spotifyToolDefs,
+    ...capabilityToolDefs,
   ] as Tool[]
 }
 
@@ -73,7 +98,7 @@ export function getToolsForAgent(): Tool[] {
 export async function handleTool(
   name: string,
   input: Record<string, unknown>,
-  ctx?: { userText?: string },
+  ctx?: { userText?: string; signal?: AbortSignal },
 ): Promise<string> {
   // Gmail compose guard — must be an explicit user request
   if (name === 'gmail_compose') {
@@ -81,6 +106,31 @@ export async function handleTool(
       return 'No composer opened — the user did not ask for a new email.'
     }
     input = { ...input, _suppressUi: false }
+  }
+
+  // Active log — a friendly line for the Activity pane plus a technical line
+  // for the Console pane. This is the single source of "what Jarvis is doing";
+  // raw tool names no longer leak into the chat transcript.
+  const startedAt = Date.now()
+  emitEvent({ type: 'activity', kind: 'action', text: describeTool(name, input), ts: startedAt })
+  emitEvent({ type: 'activity', kind: 'console', text: name, detail: summarizeArgs(input), ts: startedAt })
+
+  // The ONE destructive-tool gate — awaits the user's real answer in place
+  // before dispatch. `setAwaitingApproval` tells handlePttStart (index.ts) not
+  // to treat a PTT press as barge-in while this is pending — it's the answer
+  // path instead. If the turn is cancelled/superseded while we're waiting,
+  // `ctx.signal` aborts and awaitApproval resolves false.
+  if (DESTRUCTIVE.has(name)) {
+    const action = APPROVAL_ACTION_LABEL[name] ?? describeTool(name, input)
+    const detail = approvalDetail(input)
+    setAwaitingApproval(true)
+    let approved = false
+    try {
+      approved = await awaitApproval(action, detail, { signal: ctx?.signal })
+    } finally {
+      setAwaitingApproval(false)
+    }
+    if (!approved) return 'User declined this action — do not retry it. Acknowledge and move on.'
   }
 
   let result: string
@@ -98,6 +148,7 @@ export async function handleTool(
   else if (name.startsWith('command_'))   result = await handleCommandTool(name, input)
   else if (name.startsWith('github_'))    result = await handleGithubTool(name, input)
   else if (name.startsWith('spotify_'))   result = await handleSpotifyTool(name, input)
+  else if (name === 'request_capability') result = handleCapabilityTool(name, input)
   else {
     const msg = `Unknown tool: ${name}`
     console.error('[tools]', msg)
@@ -108,7 +159,7 @@ export async function handleTool(
   // Preference learning (fire-and-forget)
   try {
     if (name === 'app_launch') {
-      insertUserEvent('tool_used', `app_launch:${String(input.name ?? '')}`)
+      insertUserEvent('tool_used', `app_launch:${String(input.app_name ?? input.name ?? '')}`)
     } else if (name === 'web_search') {
       insertUserEvent('tool_used', 'web_search')
       insertUserEvent('web_search', String(input.query ?? ''))
@@ -116,6 +167,8 @@ export async function handleTool(
       insertUserEvent('tool_used', name)
     }
   } catch { /* non-critical */ }
+
+  emitEvent({ type: 'activity', kind: 'console', text: `${name} ✓`, detail: `${Date.now() - startedAt}ms`, ts: Date.now() })
 
   return result
 }

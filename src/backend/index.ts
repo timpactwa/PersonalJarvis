@@ -25,20 +25,34 @@ import { WebSocketServer, WebSocket } from 'ws'
 import { createServer } from 'http'
 import type { BackendEvent, RendererEvent } from './types'
 import { setEmitter } from './events'
+import { beginTurn, endTurn, cancelCurrent, isCurrent, isTurnActive, isAwaitingApproval, setAwaitingApproval, onCancel, type Turn } from './turnManager'
 import { transcribe as transcribeLocal } from './whisper'
 import { transcribe as transcribeGroq } from './groqWhisper'
 
-function transcribe(buf: Buffer): Promise<string> {
+function transcribe(buf: Buffer, signal?: AbortSignal): Promise<string> {
   if (process.env.GROQ_API_KEY) {
     console.error('[pipeline] STT: Groq Whisper')
-    return transcribeGroq(buf)
+    return transcribeGroq(buf, signal)
   }
+  // Local Whisper can't abort mid-inference — caller discards the result via
+  // its own abort check right after this resolves.
   console.error('[pipeline] STT: local Whisper')
   return transcribeLocal(buf)
+}
+
+function isAbortError(err: unknown): boolean {
+  return err instanceof Error && err.name === 'AbortError'
+}
+
+function throwIfAborted(signal: AbortSignal): void {
+  if (signal.aborted) {
+    throw (signal.reason instanceof Error ? signal.reason : new DOMException('cancelled', 'AbortError'))
+  }
 }
 import { chat as chatClaude, isChatAvailable, type Message, type PendingEntity } from './claude'
 import { chat as chatGroq } from './groq'
 import { chat as chatOllama } from './ollama'
+import { buildProviderChain, type ConcreteProvider } from './routing'
 
 // In `auto` mode Claude handles BOTH tool and conversational requests, with
 // per-turn tiered model selection (Haiku/Sonnet/Fable via selectModel). Groq is
@@ -92,87 +106,62 @@ function getActiveProviderLabel(): string {
   return 'ollama'
 }
 
-function claudeWithGroqFallback(
+function runProvider(
+  provider: ConcreteProvider,
   userText: string,
   history: Message[],
   memories: string[],
   broadcast: (e: BackendEvent) => void,
-  forceModel?: string,
+  signal?: AbortSignal,
 ) {
-  return chatClaude(userText, history, memories, broadcast, undefined, undefined, forceModel).catch((err: unknown) => {
-    const msg = err instanceof Error ? err.message : String(err)
-    const rateLimited = msg.includes('429') || msg.includes('rate_limit')
-    if (rateLimited) {
-      if (process.env.GROQ_API_KEY) {
-        console.error('[pipeline] Claude rate limited — falling back to Groq')
-        return chatGroq(userText, history, memories, broadcast)
-      }
-      console.error('[pipeline] Claude rate limited — falling back to Ollama')
-      return chatOllama(userText, history, memories, broadcast)
-    }
-    throw err
-  })
+  if (provider === 'claude') return chatClaude(userText, history, memories, broadcast, undefined, undefined, undefined, signal)
+  if (provider === 'groq') return chatGroq(userText, history, memories, broadcast, signal)
+  return chatOllama(userText, history, memories, broadcast, signal)
 }
 
-function chat(
+// Walk the preference-ordered provider chain (claude → groq → ollama), falling
+// back to the next provider on ANY failure — not just 429. A provider that is
+// down throws before streaming any tokens (ECONNREFUSED / 401 / 404 / 429 / a
+// stream error), so the fallback is clean. Tool errors inside a provider are
+// caught internally and returned as tool results, so they never trigger a
+// spurious fallback. This is what stops a single dead provider (e.g. an Ollama
+// that isn't running) from hard-failing the turn.
+async function chat(
   userText: string,
   history: Message[],
   memories: string[],
   broadcast: (e: BackendEvent) => void,
+  signal?: AbortSignal,
 ) {
-  const provider = getLlmProvider()
+  const pref = getLlmProvider()
+  const chain = buildProviderChain(pref, {
+    claude: isChatAvailable(),
+    groq: !!process.env.GROQ_API_KEY,
+  })
 
-  if (provider === 'groq') {
-    if (!process.env.GROQ_API_KEY) {
-      throw new Error('LLM provider set to Groq but GROQ_API_KEY is not configured in .env.local')
-    }
-    console.error('[pipeline] forced Groq')
-    return chatGroq(userText, history, memories, broadcast)
-  }
-
-  if (provider === 'ollama') {
-    console.error('[pipeline] forced Ollama')
-    return chatOllama(userText, history, memories, broadcast)
-  }
-
-  if (provider === 'claude') {
-    if (!isChatAvailable()) {
-      throw new Error('LLM provider set to Claude but no credentials are configured in .env.local')
-    }
-    console.error('[pipeline] forced Claude')
-    return claudeWithGroqFallback(userText, history, memories, broadcast)
-  }
-
-  // auto — tool requests → Claude (tiered Haiku/Sonnet/Fable via selectModel)
-  //        → Groq fallback on rate limit
-  //        conversational → Claude tiered routing as well
-  if (needsTool(userText)) {
-    if (isChatAvailable()) {
-      console.error('[pipeline] tool request — using Claude (tiered routing)')
-      return claudeWithGroqFallback(userText, history, memories, broadcast)
-    }
-    if (process.env.GROQ_API_KEY) {
-      console.error('[pipeline] tool request — using Groq (no Claude key)')
-      return chatGroq(userText, history, memories, broadcast)
+  let lastErr: unknown
+  for (let i = 0; i < chain.length; i++) {
+    const provider = chain[i]
+    try {
+      if (i === 0) console.error(`[pipeline] provider: ${provider} (pref: ${pref})`)
+      else console.error(`[pipeline] ${chain[i - 1]} failed — falling back to ${provider}`)
+      return await runProvider(provider, userText, history, memories, broadcast, signal)
+    } catch (err) {
+      // A user barge-in aborts the turn — that is NOT a provider failure, so
+      // never fall through to the next provider on it.
+      if (isAbortError(err) || signal?.aborted) throw err
+      lastErr = err
+      console.error(`[pipeline] provider ${provider} failed:`, err instanceof Error ? err.message : String(err))
     }
   }
-  if (isChatAvailable()) {
-    console.error('[pipeline] conversational — using Claude')
-    return claudeWithGroqFallback(userText, history, memories, broadcast)
-  }
-  if (process.env.GROQ_API_KEY) {
-    console.error('[pipeline] using Groq LLM')
-    return chatGroq(userText, history, memories, broadcast)
-  }
-  console.error('[pipeline] using Ollama LLM (last resort)')
-  return chatOllama(userText, history, memories, broadcast)
+  throw lastErr ?? new Error('All LLM providers failed')
 }
 import { synthesizeEdge } from './edgeTts'
 import { handleSpotifyTool } from './tools/spotify'
-import { initDb, closeDb, isDbAvailable, getDbError, getUsageDaily, getUsageByModel, getAllMemories, insertMemory, deleteMemory } from './memory/db'
+import { initDb, closeDb, isDbAvailable, getDbError, getUsageDaily, getUsageByModel, getAllMemories, insertMemory, deleteMemory, getMemoryCount, getEntityCount } from './memory/db'
 import { logApiCall, getStatsToday } from './memory/logger'
 import { embed, findTopK } from './memory/embeddings'
-import { resolveConfirmation, hasPending, getLatestPending } from './confirm'
+import { resolveApproval, hasPending, getLatestPending, classifyApprovalUtterance } from './confirm'
 import { sendEmailNow, createDraft, createCalendarEvent } from './tools/gmail'
 import { upsertEntity, findMentionedEntities, getPreferenceSummary } from './memory/db'
 import {
@@ -223,6 +212,13 @@ monitors.setSpeakFn((text) => speakOrIdle(text))
 // dshow open used to cost 1-2s on the first M press).
 void initCapture()
 
+// Warm the embedding model at startup, in parallel with the mic. It lazily
+// downloads/loads ~80MB on first use; doing it here (rather than on the first
+// WebSocket connection) means it's usually ready before the user can speak,
+// so the first turn doesn't stall on model load. Cached, so the connection-time
+// warmup below becomes a no-op hit.
+void embed('warmup').catch(() => {})
+
 const server = createServer()
 const wss = new WebSocketServer({ server })
 
@@ -230,7 +226,6 @@ const PORT = parseInt(process.env.JARVIS_PORT ?? '0', 10)
 
 let _activeWs: WebSocket | null = null
 let rendererBuild = 'UNKNOWN (no __hello)'
-let isProcessing = false
 
 // Image attached by the user (drag-drop or screenshot hotkey) — consumed by
 // the next conversation turn, which is forced onto Claude for vision.
@@ -241,10 +236,68 @@ let pendingImprovementResolve: ((answer: string) => void) | null = null
 
 export function broadcast(event: BackendEvent): void {
   if (!_activeWs || _activeWs.readyState !== WebSocket.OPEN) return
-  const msg = event.type === 'audio' ? event.data : JSON.stringify(event)
-  _activeWs.send(msg)
+  if (event.type === 'audio') {
+    // Frame: 4-byte LE uint32 turn id + MP3 payload. The renderer drops frames
+    // from turns that are no longer current (barge-in); id 0 always plays.
+    const header = Buffer.alloc(4)
+    header.writeUInt32LE(event.turnId ?? 0, 0)
+    _activeWs.send(Buffer.concat([header, event.data]))
+    return
+  }
+  _activeWs.send(JSON.stringify(event))
 }
 setEmitter(broadcast)
+
+// A broadcast bound to one turn: emits only while that turn is still current,
+// so a cancelled (barged-in) turn can never paint stale state/transcript/audio.
+function forTurn(turnId: number): (e: BackendEvent) => void {
+  return (e) => { if (isCurrent(turnId)) broadcast(e) }
+}
+
+// Speaking watchdog — backstop for the renderer/WS dying or dropping mid-speech.
+// speakOrIdle arms this right after broadcasting `audio` or `speak_text`; the
+// normal path clears it when `speech_done` comes back from the renderer. If
+// the renderer reloads/crashes or the socket drops, speech_done never
+// arrives and background monitors (paused via monitors.setIdle(false) for
+// the duration of the turn) would stay paused forever without this.
+const SPEECH_WATCHDOG_CAP_MS = 90_000
+let speechWatchdogTimer: ReturnType<typeof setTimeout> | null = null
+
+function clearSpeechWatchdog(): void {
+  if (speechWatchdogTimer !== null) {
+    clearTimeout(speechWatchdogTimer)
+    speechWatchdogTimer = null
+  }
+}
+
+// Pure math, exported for unit testing. 96kbps mono estimate + grace period,
+// capped so a huge reply can't wedge the watchdog open for minutes.
+export function estimateAudioWatchdogMs(audioByteLength: number): number {
+  const estimatedPlaybackMs = (audioByteLength * 8 / 96_000) * 1000
+  return Math.min(estimatedPlaybackMs + 5000, SPEECH_WATCHDOG_CAP_MS)
+}
+
+export function estimateSpeakTextWatchdogMs(wordCount: number): number {
+  return Math.min(wordCount * 400 + 8000, SPEECH_WATCHDOG_CAP_MS)
+}
+
+function armSpeechWatchdog(ms: number, turnId: number): void {
+  clearSpeechWatchdog()
+  speechWatchdogTimer = setTimeout(() => {
+    speechWatchdogTimer = null
+    monitors.setIdle(true)
+    // turnId 0 is turnless (monitor alerts etc.) and always broadcasts;
+    // otherwise only restore idle if this is still the current turn — a
+    // superseding turn already owns the UI state.
+    if (turnId === 0 || isCurrent(turnId)) {
+      broadcast({ type: 'state', state: 'idle' })
+    }
+  }, ms)
+}
+
+// A barge-in cancels whatever turn owns any in-flight speech watchdog — the
+// tts_stop broadcast and the new turn's own lifecycle take over from here.
+onCancel(() => clearSpeechWatchdog())
 
 async function sendDiagnostics(): Promise<void> {
   const issues: string[] = []
@@ -342,12 +395,22 @@ wss.on('connection', (ws: WebSocket) => {
   })
 
   ws.on('close', () => {
+    // Only clear the active socket if THIS is still it. On a reconnect the new
+    // connection arrives before the old one's close fires; without this guard
+    // the stale close would null out the live socket and silently kill every
+    // broadcast, making the app look frozen.
+    if (_activeWs !== ws) {
+      console.log('[backend] stale renderer socket closed (newer one active)')
+      return
+    }
     _activeWs = null
     rendererBuild = 'UNKNOWN (no __hello)'
     console.log('[backend] renderer disconnected')
   })
 
-  broadcast({ type: 'state', state: 'idle' })
+  // A reconnect mid-turn must not lie about the state — the turn is still
+  // running on this side even though the renderer just (re)appeared.
+  broadcast({ type: 'state', state: isTurnActive() ? 'thinking' : 'idle' })
 
   if (!monitors.isRunning()) {
     monitors.startAll()
@@ -375,6 +438,7 @@ function handleRendererEvent(event: RendererEvent): void {
     return
   }
   if (event.type === 'speech_done') {
+    clearSpeechWatchdog()
     monitors.setIdle(true)
     return
   }
@@ -387,18 +451,12 @@ function handleRendererEvent(event: RendererEvent): void {
     return
   }
   if (event.type === 'confirm_response') {
-    void (async () => {
-      try {
-        const result = await resolveConfirmation(event.id, event.approved)
-        broadcast({ type: 'confirm_resolved', id: event.id, approved: event.approved })
-        const msg = event.approved ? (result ?? 'Done.') : 'Cancelled.'
-        broadcast({ type: 'transcript', role: 'assistant', text: msg, partial: false })
-        await speakOrIdle(msg)
-      } catch (err) {
-        broadcast({ type: 'error', message: String(err) })
-        broadcast({ type: 'state', state: 'idle' })
-      }
-    })()
+    // The awaiting tool call inside handleTool's gate resumes on this and
+    // returns the real outcome to the model as its tool result — the model
+    // phrases the reply itself in the same turn. No canned transcript/speak
+    // here anymore, and confirm.ts already emits confirm_resolved on settle,
+    // so we don't double-emit it.
+    resolveApproval(event.id, event.approved)
     return
   }
   if (event.type === 'email_compose_dismissed') {
@@ -487,6 +545,20 @@ function handleRendererEvent(event: RendererEvent): void {
     }
     return
   }
+  if (event.type === 'get_dashboard') {
+    try {
+      broadcast({
+        type: 'dashboard_data',
+        memoryCount: getMemoryCount(),
+        entityCount: getEntityCount(),
+        sttEngine: process.env.GROQ_API_KEY ? 'Groq Whisper' : 'Local Whisper',
+        uptimeSec: Math.floor(process.uptime()),
+      })
+    } catch (err) {
+      broadcast({ type: 'error', message: String(err) })
+    }
+    return
+  }
   if (event.type === 'get_settings') {
     broadcast({ type: 'settings', settings: getSettings() })
     return
@@ -501,6 +573,8 @@ function handleRendererEvent(event: RendererEvent): void {
     if (updated.llmProvider) {
       console.error('[backend] LLM provider changed to:', updated.llmProvider)
     }
+    if (event.settings.hotkey) broadcast({ type: 'hotkey_changed', hotkey: updated.hotkey })
+    if (event.settings.screenshotHotkey) broadcast({ type: 'screenshot_hotkey_changed', hotkey: updated.screenshotHotkey })
     return
   }
   if (event.type === 'get_memories') {
@@ -558,55 +632,95 @@ export const eventHandlers: Array<(e: RendererEvent) => void> = []
 
 const conversationHistory: Message[] = []
 
-// One pending utterance (latest wins). Input that arrives while the pipeline
-// is busy is processed as soon as the current turn finishes instead of being
-// silently dropped — dropping it made follow-up requests feel dead.
-let pending: { kind: 'audio'; pcm: Buffer } | { kind: 'text'; text: string } | null = null
+// Latest wins IMMEDIATELY: a new utterance/text begins a fresh turn, which
+// cancels whatever was in flight (beginTurn aborts the previous turn's
+// signal). No queue — queued input made barge-in impossible and follow-up
+// requests feel dead while the old turn droned on.
 
-function drainPending(): void {
-  if (!pending) return
-  const next = pending
-  pending = null
-  if (next.kind === 'audio') void processAudio(next.pcm, 'queued-ptt')
-  else void processUserText(next.text, 'queued-text')
+// Approval intercept + ordering note: when a destructive-tool confirmation
+// (or plan preview / improvement question) is pending, isAwaitingApproval()
+// is true. If THIS audio is the spoken yes/no answer, it must resolve the
+// pending approval WITHOUT starting a new turn — beginTurn() cancels
+// whatever turn is current, which for an awaiting turn is exactly the one
+// waiting on this answer (it aborts ctx.signal, which resolves awaitApproval
+// to false and races the real answer). But we can't know whether this audio
+// IS the answer until it's transcribed, and normal transcription is tied to
+// a turn's abort signal/state broadcasts. So: when approval is pending,
+// transcribe FIRST here with no turn (an ungated 'thinking' broadcast, since
+// there's no turn-bound `tb` yet) and classify the result.
+//   - yes/no  → resolve the pending approval, echo the user transcript, and
+//     return. No new turn is ever started; the awaiting turn resumes inside
+//     handleTool and finishes on its own turn/tb.
+//   - neither → this is a new, unrelated utterance. Fall through to the
+//     normal turn-based pipeline, reusing the transcript we already have so
+//     the audio is never transcribed twice. beginTurn() then cancels the
+//     awaiting turn as an ordinary barge-in.
+async function processAudio(pcmBuffer: Buffer, source: string): Promise<void> {
+  if (isAwaitingApproval() && hasPending()) {
+    broadcast({ type: 'state', state: 'thinking' })
+    let text = ''
+    try {
+      text = await transcribe(pcmBuffer)
+    } catch (err) {
+      console.error('[pipeline] approval-intercept transcription failed — falling back to normal pipeline:', err)
+      return runTurnForAudio(pcmBuffer, source)
+    }
+    const cls = text ? classifyApprovalUtterance(text) : null
+    if (cls) {
+      const pendingApproval = getLatestPending()
+      if (pendingApproval) {
+        resolveApproval(pendingApproval.id, cls === 'yes')
+        broadcast({ type: 'transcript', role: 'user', text, partial: false })
+      }
+      return
+    }
+    return runTurnForAudio(pcmBuffer, source, text)
+  }
+
+  return runTurnForAudio(pcmBuffer, source)
 }
 
-async function processAudio(pcmBuffer: Buffer, source: string): Promise<void> {
-  if (isProcessing) {
-    console.warn('[pipeline] busy — queueing audio from', source)
-    pending = { kind: 'audio', pcm: pcmBuffer }
-    return
-  }
-  isProcessing = true
+async function runTurnForAudio(pcmBuffer: Buffer, source: string, pretranscribed?: string): Promise<void> {
+  const turn = beginTurn()
+  const tb = forTurn(turn.id)
+  tb({ type: 'turn', id: turn.id })
   monitors.setIdle(false)
 
   console.error(
     '[pipeline] received audio:', pcmBuffer.length, 'bytes',
     '| source:', source,
+    '| turn:', turn.id,
     '| renderer build:', rendererBuild,
   )
-  broadcast({ type: 'state', state: 'thinking' })
+  tb({ type: 'state', state: 'thinking' })
 
   try {
-    console.error('[pipeline] transcribing...')
-    const userText = await transcribe(pcmBuffer)
+    let userText = pretranscribed
+    if (userText === undefined) {
+      console.error('[pipeline] transcribing...')
+      userText = await transcribe(pcmBuffer, turn.signal)
+      throwIfAborted(turn.signal)
+    }
     if (!userText) {
       console.error('[pipeline] empty transcription — returning to idle')
-      broadcast({ type: 'transcript', role: 'assistant', text: "I didn't catch that. Try again or type your question.", partial: false })
-      broadcast({ type: 'state', state: 'idle' })
+      tb({ type: 'transcript', role: 'assistant', text: "I didn't catch that. Try again or type your question.", partial: false })
+      tb({ type: 'state', state: 'idle' })
       monitors.setIdle(true)   // no speech follows — re-enable monitor drain
       return
     }
-    await runConversation(userText)
+    await runConversation(userText, tb, turn)
   } catch (err) {
+    if (isAbortError(err) || turn.signal.aborted) {
+      console.error(`[pipeline] turn ${turn.id} cancelled (${source}) — superseding turn owns the UI`)
+      return
+    }
     const msg = err instanceof Error ? err.message : String(err)
     console.error('[pipeline] error processing audio:', msg)
-    broadcast({ type: 'error', message: friendlyError(err) })
-    broadcast({ type: 'state', state: 'idle' })
+    tb({ type: 'error', message: friendlyError(err) })
+    tb({ type: 'state', state: 'idle' })
     monitors.setIdle(true)   // error path plays no audio; restore monitor drain
   } finally {
-    isProcessing = false
-    drainPending()
+    endTurn(turn.id)
   }
 }
 
@@ -622,13 +736,8 @@ function friendlyError(err: unknown): string {
 const TEXT_TOGGLE_RE = /\b(toggle|turn on|turn off|enable|disable|show|hide)\b.{0,20}\btext\b|\btext\b.{0,20}\b(toggle|on|off|show|hide)\b/i
 
 async function processUserText(userText: string, source: string): Promise<void> {
-  if (isProcessing) {
-    console.warn('[pipeline] busy — queueing text from', source)
-    pending = { kind: 'text', text: userText }
-    return
-  }
-
-  // UI command intercept — handle before the LLM to keep latency near zero
+  // UI command intercept — handled before any turn begins so it neither
+  // cancels an in-flight turn nor costs LLM latency.
   if (TEXT_TOGGLE_RE.test(userText)) {
     broadcast({ type: 'transcript', role: 'user', text: userText, partial: false })
     broadcast({ type: 'toggle_text' })
@@ -638,26 +747,48 @@ async function processUserText(userText: string, source: string): Promise<void> 
     return
   }
 
-  isProcessing = true
+  // Approval intercept — see processAudio's comment for the full rationale.
+  // Typed input is already verbatim text (no transcription step), so this is
+  // just: pending + yes/no → resolve it and return without starting a new
+  // turn; pending + neither → fall through, and beginTurn() below cancels the
+  // awaiting turn as an ordinary barge-in (its awaitApproval resolves false).
+  if (isAwaitingApproval() && hasPending()) {
+    const cls = classifyApprovalUtterance(userText)
+    if (cls) {
+      const pendingApproval = getLatestPending()
+      if (pendingApproval) {
+        resolveApproval(pendingApproval.id, cls === 'yes')
+        broadcast({ type: 'transcript', role: 'user', text: userText, partial: false })
+      }
+      return
+    }
+  }
+
+  const turn = beginTurn()
+  const tb = forTurn(turn.id)
+  tb({ type: 'turn', id: turn.id })
   monitors.setIdle(false)
 
-  console.log(`[pipeline] user (${source}): "${userText}"`)
-  broadcast({ type: 'state', state: 'thinking' })
+  console.log(`[pipeline] user (${source}): "${userText}" | turn: ${turn.id}`)
+  tb({ type: 'state', state: 'thinking' })
 
   try {
-    await runConversation(userText)
+    await runConversation(userText, tb, turn)
   } catch (err) {
+    if (isAbortError(err) || turn.signal.aborted) {
+      console.error(`[pipeline] turn ${turn.id} cancelled (${source}) — superseding turn owns the UI`)
+      return
+    }
     const msg = err instanceof Error ? err.message : String(err)
     console.error('[pipeline] error processing text:', msg)
-    broadcast({ type: 'error', message: friendlyError(err) })
-    broadcast({ type: 'state', state: 'idle' })
+    tb({ type: 'error', message: friendlyError(err) })
+    tb({ type: 'state', state: 'idle' })
     // No audio plays on the error path, so the speech_done roundtrip that
     // normally re-enables monitor drain will never fire — re-idle here or
     // background monitors stay paused for the rest of the session.
     monitors.setIdle(true)
   } finally {
-    isProcessing = false
-    drainPending()
+    endTurn(turn.id)
   }
 }
 
@@ -676,10 +807,13 @@ function stripMarkdownForTts(text: string): string {
 }
 
 // TTS priority: Edge TTS → Web Speech API (last resort, no internet needed).
-async function speakOrIdle(text: string): Promise<void> {
+// Callers without a turn (monitor alerts, improvement-agent questions, renderer
+// button flows) get the defaults: ungated broadcast + turn id 0 (always plays).
+async function speakOrIdle(text: string, tb: (e: BackendEvent) => void = broadcast, turn?: Turn): Promise<void> {
   const { quietMode } = getSettings()
   if (quietMode) {
-    broadcast({ type: 'state', state: 'idle' })
+    clearSpeechWatchdog()   // no speech will play — nothing to guard
+    tb({ type: 'state', state: 'idle' })
     monitors.setIdle(true)   // no audio will play — re-enable monitor drain immediately
     return
   }
@@ -687,22 +821,35 @@ async function speakOrIdle(text: string): Promise<void> {
   const speakText = stripMarkdownForTts(text)
 
   try {
-    const audioBuffer = await synthesizeEdge(speakText)
+    const audioBuffer = await synthesizeEdge(speakText, turn?.signal)
     if (audioBuffer.length === 0) throw new Error('Edge TTS returned empty audio')
-    broadcast({ type: 'audio', data: audioBuffer })
+    if (turn?.signal.aborted) return
+    tb({ type: 'audio', data: audioBuffer, turnId: turn?.id ?? 0 })
+    armSpeechWatchdog(estimateAudioWatchdogMs(audioBuffer.length), turn?.id ?? 0)
     // Do NOT call monitors.setIdle(true) here — wait for speech_done from renderer
     return
   } catch (err) {
+    // Barge-in during synthesis: propagate so the pipeline's abort path runs.
+    if (isAbortError(err) || turn?.signal.aborted) throw err
     console.error('[tts] Edge TTS failed, falling back to Web Speech:', err instanceof Error ? err.message : err)
   }
 
   // Web Speech API fallback — renderer plays via speechSynthesis (no network needed)
-  broadcast({ type: 'state', state: 'speaking' })
-  broadcast({ type: 'speak_text', text: speakText })
+  tb({ type: 'state', state: 'speaking' })
+  tb({ type: 'speak_text', text: speakText })
+  const wordCount = speakText.trim().split(/\s+/).filter(Boolean).length
+  armSpeechWatchdog(estimateSpeakTextWatchdogMs(wordCount), turn?.id ?? 0)
   // Do NOT call monitors.setIdle(true) here — wait for speech_done from renderer
 }
 
-async function runConversation(userText: string): Promise<void> {
+async function runConversation(
+  userText: string,
+  tb: (e: BackendEvent) => void,
+  turn: Turn,
+): Promise<void> {
+  // Shadow the module-level broadcast: every emit inside this turn is gated on
+  // the turn still being current, so a barged-in turn paints nothing stale.
+  const broadcast = tb
   broadcast({ type: 'transcript', role: 'user', text: userText, partial: false })
 
   // If improvement agent is waiting for user input, route this turn to it
@@ -713,19 +860,12 @@ async function runConversation(userText: string): Promise<void> {
     return
   }
 
-  if (hasPending()) {
-    const yes = /\b(yes|yeah|yep|confirm|confirmed|send it|do it|go ahead|affirmative|proceed)\b/i.test(userText)
-    const no = /\b(no|nope|cancel|stop|don'?t|negative|abort)\b/i.test(userText)
-    if (yes || no) {
-      const conf = getLatestPending()!
-      const result = await resolveConfirmation(conf.id, yes)
-      broadcast({ type: 'confirm_resolved', id: conf.id, approved: yes })
-      const reply = yes ? (result ?? 'Done.') : 'Cancelled.'
-      broadcast({ type: 'transcript', role: 'assistant', text: reply, partial: false })
-      await speakOrIdle(reply)
-      return
-    }
-  }
+  // NOTE: the yes/no-to-a-pending-approval intercept used to live here, but
+  // by the time runConversation is reached a NEW turn has already begun
+  // (beginTurn() already cancelled whatever turn was awaiting approval). The
+  // intercept now runs at the TOP of processAudio/processUserText, before a
+  // new turn starts, so a yes/no answer never cancels the turn it's meant to
+  // resume. See the comments there.
 
   const bulkContacts = parseContactsFromUserMessage(userText)
   if (bulkContacts.length > 0) {
@@ -744,7 +884,7 @@ async function runConversation(userText: string): Promise<void> {
     conversationHistory.push({ role: 'user', content: userText })
     conversationHistory.push({ role: 'assistant', content: reply })
     broadcast({ type: 'transcript', role: 'assistant', text: reply, partial: false })
-    await speakOrIdle(reply)
+    await speakOrIdle(reply, tb, turn)
     return
   }
 
@@ -822,8 +962,9 @@ async function runConversation(userText: string): Promise<void> {
   if (useVision) console.error('[pipeline] vision turn — forced Claude')
 
   const result = useVision
-    ? await chatClaude(userText, conversationHistory, topMems, broadcast, attachedImage!.imageBase64, attachedImage!.mimeType)
-    : await chat(userText, conversationHistory, topMems, broadcast)
+    ? await chatClaude(userText, conversationHistory, topMems, broadcast, attachedImage!.imageBase64, attachedImage!.mimeType, undefined, turn.signal)
+    : await chat(userText, conversationHistory, topMems, broadcast, turn.signal)
+  throwIfAborted(turn.signal)
   const { text, model, inputTokens, outputTokens, pendingMemory } = result
   // Ollama's ChatResult type omits pendingEntities; default defensively so this
   // never throws regardless of which provider answered.
@@ -833,16 +974,21 @@ async function runConversation(userText: string): Promise<void> {
   const cleaned = stripResponseTags(text)
   const finalText = cleaned.text
 
-  if (cleaned.pendingReport) {
-    broadcast({ type: 'report', format: cleaned.pendingReport.format, content: cleaned.pendingReport.content })
+  const report = (result as { pendingReport?: { format: 'html' | 'md'; content: string } | null }).pendingReport ?? cleaned.pendingReport
+  if (report) {
+    broadcast({ type: 'report', format: report.format, content: report.content })
   }
 
   console.log(`[pipeline] jarvis (${model}): "${finalText.slice(0, 80)}..."`)
 
-  conversationHistory.push({ role: 'user', content: userText })
-  conversationHistory.push({ role: 'assistant', content: finalText })
-  while (conversationHistory.length > 60) {
-    conversationHistory.splice(0, 2)
+  // A barged-in turn must not pollute history with an answer the user never
+  // heard — only the still-current turn records the exchange.
+  if (isCurrent(turn.id)) {
+    conversationHistory.push({ role: 'user', content: userText })
+    conversationHistory.push({ role: 'assistant', content: finalText })
+    while (conversationHistory.length > 60) {
+      conversationHistory.splice(0, 2)
+    }
   }
 
   if (pendingMemory) {
@@ -890,12 +1036,20 @@ async function runConversation(userText: string): Promise<void> {
     broadcast({ type: 'transcript', role: 'assistant', text: finalText, partial: false })
   }
 
-  await speakOrIdle(finalText)
+  throwIfAborted(turn.signal)
+  await speakOrIdle(finalText, tb, turn)
 }
 
 function handlePttStart(): void {
-  // Recording is allowed even while a previous turn is processing — the
-  // utterance is queued on release instead of being silently dropped.
+  // BARGE-IN: a new press while a turn is thinking/speaking cancels it — the
+  // abort signal kills in-flight STT/LLM/TTS, the gated broadcast mutes its
+  // stale output, and tts_stop makes the renderer stop playback immediately.
+  // Exception: while a confirmation prompt is awaiting the user's answer, the
+  // press IS the answer path — don't cancel the turn that's waiting on it.
+  if (!isAwaitingApproval()) {
+    const hadTurn = cancelCurrent('barge-in')
+    if (hadTurn) broadcast({ type: 'tts_stop' })
+  }
   if (!isCaptureAvailable()) {
     const err = getCaptureError() ?? 'native audio capture unavailable'
     console.error('[ptt] cannot start capture:', err)
@@ -912,7 +1066,7 @@ function handlePttStart(): void {
 async function handlePttStop(): Promise<void> {
   const pcm = stopCapture()
   if (!pcm) {
-    if (!isProcessing) broadcast({ type: 'state', state: 'idle' })
+    broadcast({ type: 'state', state: isTurnActive() ? 'thinking' : 'idle' })
     return
   }
   await processAudio(pcm, 'backend-ptt')
@@ -959,7 +1113,12 @@ server.on('request', (req, res) => {
           broadcast({ type: 'audio', data: audio })
         } catch { /* TTS failure is non-critical */ }
 
-        // Wait for next PTT response (5 min timeout)
+        // Wait for next PTT response (5 min timeout). Arm the same
+        // awaiting-approval flag the destructive-tool gate uses so a PTT
+        // press meant to answer this question isn't treated as a barge-in
+        // cancel of some other in-flight turn — cleared exactly once,
+        // whichever branch below resolves the promise first.
+        setAwaitingApproval(true)
         const answer = await new Promise<string>((resolve) => {
           pendingImprovementResolve = resolve
           setTimeout(() => {
@@ -969,6 +1128,7 @@ server.on('request', (req, res) => {
             }
           }, 5 * 60 * 1000)
         })
+        setAwaitingApproval(false)
 
         res.writeHead(200, { 'Content-Type': 'text/plain' })
         res.end(answer)

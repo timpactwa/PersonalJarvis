@@ -254,7 +254,7 @@ async function currentTrack(): Promise<string> {
   if (!res.ok) return `Spotify error: ${res.status}`
 
   const data = await res.json() as {
-    item?: { name: string; artists: Array<{ name: string }>; album: { name: string } }
+    item?: { name: string; artists: Array<{ name: string }>; album: { name: string; images?: Array<{ url: string; width?: number }> } }
     progress_ms?: number
     duration_ms?: number
     is_playing?: boolean
@@ -271,8 +271,11 @@ async function currentTrack(): Promise<string> {
   const duration = data.duration_ms ?? 1
   const pct = Math.round((progress / duration) * 100)
   const status = data.is_playing ? 'Playing' : 'Paused'
+  // Prefer a mid-size cover (~300px); fall back to the first available image.
+  const images = track.album.images ?? []
+  const albumArt = (images.find(i => (i.width ?? 0) >= 200 && (i.width ?? 0) <= 400) ?? images[0])?.url
 
-  emitEvent({ type: 'spotify_now_playing', track: track.name, artist, isPlaying: data.is_playing ?? false })
+  emitEvent({ type: 'spotify_now_playing', track: track.name, artist, isPlaying: data.is_playing ?? false, albumArt })
 
   return `${status}: "${track.name}" by ${artist} — ${track.album.name} (${pct}% through)`
 }

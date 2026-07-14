@@ -1,5 +1,6 @@
 import { randomUUID } from 'crypto'
 import { emitEvent } from './events'
+import { describeAgentMessage } from './tools/describe'
 import type { AgentInfo } from './types'
 
 const dynamicImport = new Function('specifier', 'return import(specifier)')
@@ -21,13 +22,6 @@ export function closeAgent(id: string): void {
 /** Test-only helper to clear state between cases. */
 export function _resetAgents(): void {
   agents.clear()
-}
-
-function extractText(message: unknown): string {
-  const m = message as { message?: { content?: Array<{ type?: string; text?: string }> } }
-  const blocks = m.message?.content
-  if (!Array.isArray(blocks)) return ''
-  return blocks.filter(b => b.type === 'text' && b.text).map(b => b.text as string).join('').trim()
 }
 
 const WORKER_SYSTEM_PROMPT =
@@ -67,14 +61,14 @@ async function runAgent(info: AgentInfo, context?: string): Promise<void> {
         customSystemPrompt: WORKER_SYSTEM_PROMPT,
       },
     })) {
+      // Surface narration AND tool calls (Reading/Searching/Fetching) so the
+      // agent's live work is visible, not just its occasional text.
+      for (const action of describeAgentMessage(message)) {
+        info.actions.push(action)
+        emitEvent({ type: 'agent_update', id: info.id, action })
+      }
       const m = message as { type?: string; result?: unknown }
-      if (m.type === 'assistant') {
-        const text = extractText(message)
-        if (text) {
-          info.actions.push(text)
-          emitEvent({ type: 'agent_update', id: info.id, action: text })
-        }
-      } else if (m.type === 'result') {
+      if (m.type === 'result') {
         info.status = 'done'
         info.result = String(m.result ?? 'Task complete.')
         console.log(`[agent ${info.name}] done:`, info.result.slice(0, 200))

@@ -1,4 +1,10 @@
-import { describe, it, expect } from 'vitest'
+import { describe, it, expect, vi } from 'vitest'
+
+vi.mock('child_process', () => ({
+  exec: vi.fn((_cmd: string, _opts: unknown, cb: (err: unknown, out: { stdout: string; stderr: string }) => void) => {
+    cb(null, { stdout: 'ran ok', stderr: '' })
+  }),
+}))
 
 describe('execute tool', () => {
   it('exports executeToolDefs and handleExecuteTool', async () => {
@@ -8,15 +14,15 @@ describe('execute tool', () => {
     expect(mod.executeToolDefs.map(t => t.name)).toContain('execute_file')
   })
 
-  it('execute_file queues a confirmation instead of running immediately', async () => {
-    const { clearPending, hasPending } = await import('../../../src/backend/confirm')
+  // Approval now happens upstream in handleTool's destructive-tool gate
+  // (tools/index.ts) — by the time queueExecute/handleExecuteTool runs, the
+  // user has already approved. It runs the file directly and returns the
+  // real output string for the model to report.
+  it('execute_file runs the file directly and returns its output', async () => {
     const { handleExecuteTool } = await import('../../../src/backend/tools/execute')
-    clearPending()
     const home = process.env.USERPROFILE ?? process.env.HOME ?? 'C:\\Users'
     const reply = await handleExecuteTool('execute_file', { path: `${home}\\demo.bat` })
-    expect(reply.toLowerCase()).toContain('confirm')
-    expect(hasPending()).toBe(true)
-    clearPending()
+    expect(reply).toBe('ran ok')
   })
 
   it('execute_file rejects paths outside allowed roots', async () => {

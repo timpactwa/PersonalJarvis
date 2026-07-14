@@ -20,6 +20,20 @@ function resolveVoice(): string {
 let _tts: MsEdgeTTS | null = null
 let _ttsVoice = ''
 
+// Normalizes an aborted upstream signal into an Error with name === 'AbortError'
+// so callers can distinguish cancellation from provider failures/timeouts.
+function toAbortError(signal: AbortSignal): Error {
+  return signal.reason instanceof Error ? signal.reason : new DOMException('cancelled', 'AbortError')
+}
+
+// Resets the singleton the same way the stream-error path does, so the next
+// call gets a fresh connection instead of reusing a possibly-broken one.
+function resetTtsSingleton(): void {
+  try { _tts?.close() } catch {}
+  _tts = null
+  _ttsVoice = ''
+}
+
 async function getOrCreateTts(voice: string): Promise<MsEdgeTTS> {
   if (_tts && _ttsVoice === voice) return _tts
   try { _tts?.close() } catch {}
@@ -30,7 +44,9 @@ async function getOrCreateTts(voice: string): Promise<MsEdgeTTS> {
   return tts
 }
 
-export async function synthesizeEdge(text: string): Promise<Buffer> {
+export async function synthesizeEdge(text: string, signal?: AbortSignal): Promise<Buffer> {
+  if (signal?.aborted) throw toAbortError(signal)
+
   const voice = resolveVoice()
   const tts = await getOrCreateTts(voice)
   const { audioStream } = tts.toStream(text, { rate: '+25%' })
@@ -39,15 +55,27 @@ export async function synthesizeEdge(text: string): Promise<Buffer> {
   try {
     await new Promise<void>((resolve, reject) => {
       const timeout = setTimeout(() => reject(new Error('Edge TTS timed out after 15s')), 15_000)
+
+      const onAbort = (): void => {
+        clearTimeout(timeout)
+        resetTtsSingleton()
+        reject(signal ? toAbortError(signal) : new DOMException('cancelled', 'AbortError'))
+      }
+      signal?.addEventListener('abort', onAbort, { once: true })
+
+      const settle = (fn: () => void): void => {
+        signal?.removeEventListener('abort', onAbort)
+        fn()
+      }
+
       audioStream.on('data', (chunk: Buffer) => chunks.push(chunk))
-      audioStream.on('end', () => { clearTimeout(timeout); resolve() })
-      audioStream.on('error', (err: Error) => { clearTimeout(timeout); reject(err) })
+      audioStream.on('end', () => settle(() => { clearTimeout(timeout); resolve() }))
+      audioStream.on('error', (err: Error) => settle(() => { clearTimeout(timeout); reject(err) }))
     })
   } catch (err) {
     // Reset singleton on stream error so next call gets a fresh connection
-    try { _tts?.close() } catch {}
-    _tts = null
-    _ttsVoice = ''
+    // (abort path already reset it above via resetTtsSingleton).
+    if (!(err instanceof Error && err.name === 'AbortError')) resetTtsSingleton()
     throw err
   }
 

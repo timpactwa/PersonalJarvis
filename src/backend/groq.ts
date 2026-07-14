@@ -3,6 +3,13 @@ import type { PendingEntity } from './claude'
 import { getToolsForGroq, handleTool } from './tools/index'
 import { PROFILE_AND_MEMORY_NOTE } from './prompt'
 import { stripResponseTags } from './responseTags'
+import { linkAbort } from './turnManager'
+
+// Normalizes an aborted upstream signal into an Error with name === 'AbortError'
+// so callers can distinguish cancellation from provider failures/timeouts.
+function toAbortError(signal: AbortSignal): Error {
+  return signal.reason instanceof Error ? signal.reason : new DOMException('cancelled', 'AbortError')
+}
 
 const FORMAT_GUARD = `IMPORTANT: When calling tools, use the API's structured tool_calls JSON format only. Never emit XML function syntax like <function=name>{...}</function>. Only respond with plain text when no tool is needed.
 
@@ -83,6 +90,7 @@ export interface ChatResult {
   outputTokens: number
   pendingMemory: string | null
   pendingEntities: PendingEntity[]
+  pendingReport: { format: 'html' | 'md'; content: string } | null
 }
 
 interface GroqTool {
@@ -310,6 +318,7 @@ export async function chat(
   history: Message[],
   memories: string[],
   broadcast: (e: BackendEvent) => void,
+  signal?: AbortSignal,
 ): Promise<ChatResult> {
   const apiKey = process.env.GROQ_API_KEY ?? ''
   if (!apiKey) throw new Error('GROQ_API_KEY not set in .env.local')
@@ -332,123 +341,141 @@ export async function chat(
   let fullText = ''
 
   for (let step = 0; step < MAX_STEPS; step++) {
+    if (signal?.aborted) throw toAbortError(signal)
+
     const controller = new AbortController()
-    const timeoutId = setTimeout(() => controller.abort(), 30_000)
-
-    let res: Response
+    const unlink = linkAbort(signal, controller)
     try {
-      res = await fetch(`${GROQ_BASE_URL}/chat/completions`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': `Bearer ${apiKey}`,
-        },
-        body: JSON.stringify({
-          model,
-          messages,
-          tools,
-          tool_choice: 'auto',
-          stream: true,
-          stream_options: { include_usage: true },
-        }),
-        signal: controller.signal,
-      })
-    } catch (err: unknown) {
-      clearTimeout(timeoutId)
-      if (err instanceof Error && err.name === 'AbortError') {
-        throw new Error('Groq API timed out after 30s — check your internet connection')
+      const timeoutId = setTimeout(() => controller.abort(), 30_000)
+
+      let res: Response
+      try {
+        res = await fetch(`${GROQ_BASE_URL}/chat/completions`, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'Authorization': `Bearer ${apiKey}`,
+          },
+          body: JSON.stringify({
+            model,
+            messages,
+            tools,
+            tool_choice: 'auto',
+            stream: true,
+            stream_options: { include_usage: true },
+          }),
+          signal: controller.signal,
+        })
+      } catch (err: unknown) {
+        clearTimeout(timeoutId)
+        if (signal?.aborted) throw toAbortError(signal)
+        if (err instanceof Error && err.name === 'AbortError') {
+          throw new Error('Groq API timed out after 30s — check your internet connection')
+        }
+        throw new Error(`Groq request failed: ${String(err)}`)
+      } finally {
+        clearTimeout(timeoutId)
       }
-      throw new Error(`Groq request failed: ${String(err)}`)
-    } finally {
-      clearTimeout(timeoutId)
-    }
 
-    if (!res.ok) {
-      const body = await res.text().catch(() => '')
-      if (res.status === 401) throw new Error('Groq API key is invalid. Check GROQ_API_KEY in .env.local')
-      if (res.status === 429) throw new Error('Groq rate limit hit — wait a moment and try again')
+      if (!res.ok) {
+        const body = await res.text().catch(() => '')
+        if (res.status === 401) throw new Error('Groq API key is invalid. Check GROQ_API_KEY in .env.local')
+        if (res.status === 429) throw new Error('Groq rate limit hit — wait a moment and try again')
 
-      const recovered = res.status === 400 ? parseFailedToolGeneration(body) : null
-      if (recovered) {
-        console.error(`[groq] recovered tool call from failed_generation: ${recovered.name}`)
-        broadcast({ type: 'transcript', role: 'assistant', text: `→ ${recovered.name.replace(/_/g, ' ')}…`, partial: true })
+        const recovered = res.status === 400 ? parseFailedToolGeneration(body) : null
+        if (recovered) {
+          console.error(`[groq] recovered tool call from failed_generation: ${recovered.name}`)
 
-        let result: string
-        try {
-          result = await runToolCall(recovered.name, recovered.arguments, userText)
-        } catch (err) {
-          result = `Error: ${String(err)}`
+          let result: string
+          try {
+            result = await runToolCall(recovered.name, recovered.arguments, userText, signal)
+            if (signal?.aborted) throw toAbortError(signal)
+          } catch (err) {
+            if (err instanceof Error && err.name === 'AbortError') throw err
+            result = `Error: ${String(err)}`
+          }
+
+          const syntheticId = `recovered-${step}`
+          messages.push({
+            role: 'assistant',
+            content: '',
+            tool_calls: [{
+              id: syntheticId,
+              type: 'function',
+              function: { name: recovered.name, arguments: JSON.stringify(recovered.arguments) },
+            }],
+          })
+          messages.push({ role: 'tool', content: result, tool_call_id: syntheticId })
+          continue
         }
 
-        const syntheticId = `recovered-${step}`
+        throw new Error(`Groq HTTP ${res.status}: ${body || '(no body)'}`)
+      }
+
+      let streamed: StreamResult
+      try {
+        streamed = await collectStream(res, broadcast, controller)
+      } catch (err) {
+        if (signal?.aborted) throw toAbortError(signal)
+        if (err instanceof Error && err.name === 'AbortError') {
+          throw new Error('Groq stream stalled (no data for 20s) — aborted')
+        }
+        throw err
+      }
+      const { text, toolCalls, inputTokens: i, outputTokens: o } = streamed
+      inputTokens += i
+      outputTokens += o
+
+      if (signal?.aborted) throw toAbortError(signal)
+
+      if (toolCalls && toolCalls.length > 0) {
+        // Tool runs surface in the Activity log (from handleTool), not the chat.
         messages.push({
           role: 'assistant',
           content: '',
-          tool_calls: [{
-            id: syntheticId,
-            type: 'function',
-            function: { name: recovered.name, arguments: JSON.stringify(recovered.arguments) },
-          }],
+          tool_calls: toolCalls.map(tc => ({
+            id: tc.id,
+            type: 'function' as const,
+            function: { name: tc.name, arguments: tc.arguments },
+          })),
         })
-        messages.push({ role: 'tool', content: result, tool_call_id: syntheticId })
+
+        for (const tc of toolCalls) {
+          if (signal?.aborted) throw toAbortError(signal)
+          let result: string
+          try {
+            const args = JSON.parse(tc.arguments) as Record<string, unknown>
+            result = await runToolCall(tc.name, args, userText, signal)
+            if (signal?.aborted) throw toAbortError(signal)
+          } catch (err) {
+            if (err instanceof Error && err.name === 'AbortError') throw err
+            result = `Error: ${String(err)}`
+          }
+          messages.push({ role: 'tool', content: result, tool_call_id: tc.id })
+        }
         continue
       }
 
-      throw new Error(`Groq HTTP ${res.status}: ${body || '(no body)'}`)
+      fullText = text
+      break
+    } finally {
+      unlink()
     }
-
-    let streamed: StreamResult
-    try {
-      streamed = await collectStream(res, broadcast, controller)
-    } catch (err) {
-      if (err instanceof Error && err.name === 'AbortError') {
-        throw new Error('Groq stream stalled (no data for 20s) — aborted')
-      }
-      throw err
-    }
-    const { text, toolCalls, inputTokens: i, outputTokens: o } = streamed
-    inputTokens += i
-    outputTokens += o
-
-    if (toolCalls && toolCalls.length > 0) {
-      const toolLabel = toolCalls.map(tc => tc.name.replace(/_/g, ' ')).join(', ')
-      broadcast({ type: 'transcript', role: 'assistant', text: `→ ${toolLabel}…`, partial: true })
-
-      messages.push({
-        role: 'assistant',
-        content: '',
-        tool_calls: toolCalls.map(tc => ({
-          id: tc.id,
-          type: 'function' as const,
-          function: { name: tc.name, arguments: tc.arguments },
-        })),
-      })
-
-      for (const tc of toolCalls) {
-        let result: string
-        try {
-          const args = JSON.parse(tc.arguments) as Record<string, unknown>
-          result = await runToolCall(tc.name, args, userText)
-        } catch (err) {
-          result = `Error: ${String(err)}`
-        }
-        messages.push({ role: 'tool', content: result, tool_call_id: tc.id })
-      }
-      continue
-    }
-
-    fullText = text
-    break
   }
 
-  const { text, pendingMemory, pendingEntities } = stripResponseTags(fullText)
+  const { text, pendingMemory, pendingEntities, pendingReport } = stripResponseTags(fullText)
   fullText = text
 
   broadcast({ type: 'transcript', role: 'assistant', text: fullText, partial: false })
 
-  return { text: fullText, model: `groq:${model}`, inputTokens, outputTokens, pendingMemory, pendingEntities }
+  return { text: fullText, model: `groq:${model}`, inputTokens, outputTokens, pendingMemory, pendingEntities, pendingReport }
 }
 
-async function runToolCall(name: string, args: Record<string, unknown>, userText: string): Promise<string> {
-  return handleTool(name, args, { userText })
+async function runToolCall(
+  name: string,
+  args: Record<string, unknown>,
+  userText: string,
+  signal?: AbortSignal,
+): Promise<string> {
+  return handleTool(name, args, { userText, signal })
 }

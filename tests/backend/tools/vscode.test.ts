@@ -62,6 +62,13 @@ describe('openInVSCode', () => {
     expect(callArgs[0]).not.toMatch(/:\d+/)
   })
 
+  it('rejects a path with shell-breakout characters before invoking exec', async () => {
+    const { exec } = await import('child_process')
+    const { openInVSCode } = await import('../../../src/backend/tools/vscode')
+    await expect(openInVSCode('C:\\proj\\evil" & calc & "x')).rejects.toThrow(/unsafe character/)
+    expect(vi.mocked(exec)).not.toHaveBeenCalled()
+  })
+
   it('passes shell: cmd.exe option to exec', async () => {
     const { exec } = await import('child_process')
     const { openInVSCode } = await import('../../../src/backend/tools/vscode')

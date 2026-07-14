@@ -41,6 +41,8 @@ contextBridge.exposeInMainWorld('jarvis', {
   offScreenshotCaptured: () => ipcRenderer.removeAllListeners('screenshot-captured'),
   setHotkey: (accelerator: string) => ipcRenderer.send('set-hotkey', accelerator),
   setScreenshotHotkey: (hotkey: string) => ipcRenderer.send('set-screenshot-hotkey', hotkey),
+  triggerScreenshot: () => ipcRenderer.send('trigger-screenshot'),
+  relaunch: () => ipcRenderer.send('relaunch'),
   windowControls: {
     minimize: () => ipcRenderer.send('window-minimize'),
     maximize: () => ipcRenderer.send('window-maximize'),

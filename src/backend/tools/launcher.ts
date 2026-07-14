@@ -3,6 +3,7 @@ import { existsSync, readFileSync } from 'fs'
 import { join } from 'path'
 import { promisify } from 'util'
 import { findCustomCommandByAlias } from '../memory/customCommands'
+import { assertNoShellBreakout } from './shellSafe'
 import type { CustomCommand } from '../types'
 
 const execAsync = promisify(exec)
@@ -105,6 +106,7 @@ export function findSteamGameExe(gameKey: string): string | null {
 
 async function launchCustomCommand(cmd: CustomCommand): Promise<string> {
   if (cmd.kind === 'uri') {
+    assertNoShellBreakout(cmd.target, `target for "${cmd.label}"`)
     await execAsync(`start "" "${cmd.target}"`, { shell: 'cmd.exe' })
     return `Launched ${cmd.label}`
   }
@@ -116,6 +118,7 @@ async function launchCustomCommand(cmd: CustomCommand): Promise<string> {
     await execAsync(shellCmd, { shell: 'cmd.exe' })
     return `Launched ${cmd.label}`
   }
+  assertNoShellBreakout(cmd.target, `target for "${cmd.label}"`)
   if (!existsSync(cmd.target)) {
     throw new Error(`"${cmd.label}" target not found: ${cmd.target}. Use command_register to update it.`)
   }

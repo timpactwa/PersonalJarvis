@@ -1,7 +1,15 @@
 import type { BackendEvent } from './types'
+import type { PendingEntity } from './claude'
 import { getTools, handleTool } from './tools/index'
 import { getSettings } from './memory/settings'
 import { PROFILE_AND_MEMORY_NOTE } from './prompt'
+import { linkAbort } from './turnManager'
+
+// Normalizes an aborted upstream signal into an Error with name === 'AbortError'
+// so callers can distinguish cancellation from provider failures/timeouts.
+function toAbortError(signal: AbortSignal): Error {
+  return signal.reason instanceof Error ? signal.reason : new DOMException('cancelled', 'AbortError')
+}
 
 const SYSTEM_PROMPT = `You are Jarvis, a personal AI assistant. Speak in a polished, concise British manner — helpful and confident without being verbose. Keep responses under 3 sentences unless detail is genuinely needed. When using tools, act without asking for permission unless the action is destructive (e.g. sending an email or running a file). If the user asks you to remember something durable about them, include a tag of the form [REMEMBER: the fact] at the end of your reply. Never say "Certainly!" or "Of course!" — just answer directly.` + PROFILE_AND_MEMORY_NOTE
 
@@ -16,6 +24,9 @@ export interface ChatResult {
   inputTokens: number
   outputTokens: number
   pendingMemory: string | null
+  // Ollama never extracts entities, but the field keeps the provider contract
+  // uniform with claude/groq so callers don't need a defensive cast.
+  pendingEntities: PendingEntity[]
 }
 
 interface OllamaToolCall {
@@ -76,6 +87,7 @@ export async function chat(
   history: Message[],
   memories: string[],
   broadcast: (e: BackendEvent) => void,
+  signal?: AbortSignal,
 ): Promise<ChatResult> {
   const { model, baseUrl } = resolveConfig()
   const memoryContext = memories.length > 0
@@ -96,56 +108,69 @@ export async function chat(
   let fullText = ''
 
   for (let step = 0; step < MAX_STEPS; step++) {
+    if (signal?.aborted) throw toAbortError(signal)
+
     const controller = new AbortController()
-    // 120s — llama3.1:8b is 4.9GB and first cold-start can take 60-90s to page into RAM
-    const timeoutId = setTimeout(() => controller.abort(), 120_000)
-
-    let res: Response
+    const unlink = linkAbort(signal, controller)
     try {
-      res = await fetch(`${baseUrl}/api/chat`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ model, messages, tools, stream: false }),
-        signal: controller.signal,
-      })
-    } catch (err: unknown) {
-      clearTimeout(timeoutId)
-      if (err instanceof Error && err.name === 'AbortError') {
-        throw new Error(`Ollama timed out after 120s at ${baseUrl}. The model may still be loading into RAM — try again in a moment, or run: ollama serve`)
-      }
-      throw new Error(
-        `Cannot reach Ollama at ${baseUrl} — start it with: ollama serve\nDetails: ${String(err)}`
-      )
-    } finally {
-      clearTimeout(timeoutId)
-    }
+      // 120s — llama3.1:8b is 4.9GB and first cold-start can take 60-90s to page into RAM
+      const timeoutId = setTimeout(() => controller.abort(), 120_000)
 
-    if (!res.ok) {
-      const body = await res.text().catch(() => '')
-      throw new Error(`Ollama HTTP ${res.status} for model "${model}": ${body || '(no body)'}`)
-    }
-
-    const data = await res.json() as OllamaResponse
-    inputTokens += data.prompt_eval_count ?? 0
-    outputTokens += data.eval_count ?? 0
-
-    const msg = data.message
-    if (msg.tool_calls && msg.tool_calls.length > 0) {
-      messages.push({ role: 'assistant', content: msg.content ?? '', tool_calls: msg.tool_calls })
-      for (const tc of msg.tool_calls) {
-        let result: string
-        try {
-          result = await handleTool(tc.function.name, parseArgs(tc.function.arguments))
-        } catch (err) {
-          result = `Error: ${String(err)}`
+      let res: Response
+      try {
+        res = await fetch(`${baseUrl}/api/chat`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ model, messages, tools, stream: false }),
+          signal: controller.signal,
+        })
+      } catch (err: unknown) {
+        clearTimeout(timeoutId)
+        if (signal?.aborted) throw toAbortError(signal)
+        if (err instanceof Error && err.name === 'AbortError') {
+          throw new Error(`Ollama timed out after 120s at ${baseUrl}. The model may still be loading into RAM — try again in a moment, or run: ollama serve`)
         }
-        messages.push({ role: 'tool', content: result })
+        throw new Error(
+          `Cannot reach Ollama at ${baseUrl} — start it with: ollama serve\nDetails: ${String(err)}`
+        )
+      } finally {
+        clearTimeout(timeoutId)
       }
-      continue
-    }
 
-    fullText = msg.content ?? ''
-    break
+      if (!res.ok) {
+        const body = await res.text().catch(() => '')
+        throw new Error(`Ollama HTTP ${res.status} for model "${model}": ${body || '(no body)'}`)
+      }
+
+      const data = await res.json() as OllamaResponse
+      inputTokens += data.prompt_eval_count ?? 0
+      outputTokens += data.eval_count ?? 0
+
+      if (signal?.aborted) throw toAbortError(signal)
+
+      const msg = data.message
+      if (msg.tool_calls && msg.tool_calls.length > 0) {
+        messages.push({ role: 'assistant', content: msg.content ?? '', tool_calls: msg.tool_calls })
+        for (const tc of msg.tool_calls) {
+          if (signal?.aborted) throw toAbortError(signal)
+          let result: string
+          try {
+            result = await handleTool(tc.function.name, parseArgs(tc.function.arguments), { userText, signal })
+            if (signal?.aborted) throw toAbortError(signal)
+          } catch (err) {
+            if (err instanceof Error && err.name === 'AbortError') throw err
+            result = `Error: ${String(err)}`
+          }
+          messages.push({ role: 'tool', content: result })
+        }
+        continue
+      }
+
+      fullText = msg.content ?? ''
+      break
+    } finally {
+      unlink()
+    }
   }
 
   broadcast({ type: 'transcript', role: 'assistant', text: fullText, partial: false })

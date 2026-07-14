@@ -1,4 +1,11 @@
 import { WHISPER_SAMPLE_RATE } from './audioCapture'
+import { linkAbort } from './turnManager'
+
+// Normalizes an aborted upstream signal into an Error with name === 'AbortError'
+// so callers can distinguish cancellation from provider failures/timeouts.
+function toAbortError(signal: AbortSignal): Error {
+  return signal.reason instanceof Error ? signal.reason : new DOMException('cancelled', 'AbortError')
+}
 
 const GROQ_TRANSCRIPTION_URL = 'https://api.groq.com/openai/v1/audio/transcriptions'
 const MODEL = 'whisper-large-v3'
@@ -37,9 +44,11 @@ function isHallucination(text: string): boolean {
   return normalized === 'blankaudio' || normalized === 'thankyou' || normalized === 'youyou'
 }
 
-export async function transcribe(audioBuffer: Buffer): Promise<string> {
+export async function transcribe(audioBuffer: Buffer, signal?: AbortSignal): Promise<string> {
   const apiKey = process.env.GROQ_API_KEY ?? ''
   if (!apiKey) throw new Error('GROQ_API_KEY not set')
+
+  if (signal?.aborted) throw toAbortError(signal)
 
   if (audioBuffer.byteLength === 0 || audioBuffer.byteLength % 4 !== 0) {
     console.error(`[groqWhisper] invalid buffer: ${audioBuffer.byteLength} bytes — expected Float32 PCM`)
@@ -57,6 +66,7 @@ export async function transcribe(audioBuffer: Buffer): Promise<string> {
   form.append('language', 'en')
 
   const controller = new AbortController()
+  const unlink = linkAbort(signal, controller)
   const timeoutId = setTimeout(() => controller.abort(), 20_000)
 
   let res: Response
@@ -69,12 +79,14 @@ export async function transcribe(audioBuffer: Buffer): Promise<string> {
     })
   } catch (err: unknown) {
     clearTimeout(timeoutId)
+    if (signal?.aborted) throw toAbortError(signal)
     if (err instanceof Error && err.name === 'AbortError') {
       throw new Error('Groq Whisper timed out after 20s')
     }
     throw new Error(`Groq Whisper request failed: ${String(err)}`)
   } finally {
     clearTimeout(timeoutId)
+    unlink()
   }
 
   if (!res.ok) {

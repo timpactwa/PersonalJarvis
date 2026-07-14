@@ -22,7 +22,11 @@ const DEFAULTS: Settings = {
   monitorCustom: true,
 }
 
+let _settingsCache: Settings | null = null
+let _settingsCacheExpiry = 0
+
 export function getSettings(): Settings {
+  if (_settingsCache && Date.now() < _settingsCacheExpiry) return _settingsCache
   if (!isDbAvailable()) return { ...DEFAULTS }
 
   const rows = getDb().prepare('SELECT key, value FROM settings').all() as Array<{ key: string; value: string }>
@@ -41,7 +45,7 @@ export function getSettings(): Settings {
   const rawTurns = map.has('shortTurns') ? parseInt(map.get('shortTurns')!, 10) : DEFAULTS.shortTurns
   const shortTurns = Number.isFinite(rawTurns) ? rawTurns : DEFAULTS.shortTurns
 
-  return {
+  const result: Settings = {
     hotkey: map.get('hotkey') ?? DEFAULTS.hotkey,
     screenshotHotkey: map.get('screenshotHotkey') ?? DEFAULTS.screenshotHotkey,
     voiceId: map.get('voiceId') ?? DEFAULTS.voiceId,
@@ -61,9 +65,14 @@ export function getSettings(): Settings {
     monitorSystem:   map.has('monitorSystem')   ? map.get('monitorSystem')   === 'true' : DEFAULTS.monitorSystem,
     monitorCustom:   map.has('monitorCustom')   ? map.get('monitorCustom')   === 'true' : DEFAULTS.monitorCustom,
   }
+
+  _settingsCache = result
+  _settingsCacheExpiry = Date.now() + 5000
+  return _settingsCache
 }
 
 export function setSettings(partial: Partial<Settings>): Settings {
+  _settingsCache = null  // invalidate on write
   if (!isDbAvailable()) return { ...DEFAULTS, ...partial }
 
   const stmt = getDb().prepare(

@@ -1,5 +1,6 @@
 import { useState, useCallback } from 'react'
 import type { AnimState, BackendEvent, AgentInfo, Settings, UsagePoint, ModelUsage, EmailDraft, EmailMessage, CalendarEventDraft, MemoryEntry, CustomCommandDraft, GithubRow } from '../../../backend/types'
+import type { DashboardData } from '../components/DashboardView'
 
 export interface PendingConfirm {
   id: string
@@ -15,8 +16,21 @@ export interface ConversationTurn {
 
 export interface Toast { id: number; text: string }
 
+export interface ActivityEntry {
+  id: number
+  kind: 'action' | 'console'
+  text: string
+  detail?: string
+  ts: number
+}
+
+export type ViewTab = 'chat' | 'dashboard' | 'activity'
+
 export interface JarvisState {
   anim: AnimState
+  activeView: ViewTab
+  activity: ActivityEntry[]
+  dashboard: DashboardData | null
   tokensToday: number
   costToday: number
   model: string
@@ -45,7 +59,7 @@ export interface JarvisState {
   spotifyOpen: boolean
   githubOpen: boolean
   quietMode: boolean
-  spotifyNowPlaying: { track?: string; artist?: string; isPlaying: boolean } | null
+  spotifyNowPlaying: { track?: string; artist?: string; isPlaying: boolean; albumArt?: string } | null
   githubData: { tab: 'STATUS' | 'PRs' | 'ISSUES' | 'COMMITS'; rows: GithubRow[] } | null
   planPreview: { id: string; steps: string[] } | null
   capabilityMissing: { name: string; description: string } | null
@@ -55,6 +69,9 @@ export interface JarvisState {
 
 const initial: JarvisState = {
   anim: 'idle',
+  activeView: 'chat',
+  activity: [],
+  dashboard: null,
   tokensToday: 0,
   costToday: 0,
   model: 'claude',
@@ -108,7 +125,7 @@ export function useAnimState() {
             return prev
           }
           const turn: ConversationTurn = { id: Date.now() + Math.random(), role: event.role, text: event.text }
-          const history = [...prev.history, turn].slice(-10)
+          const history = [...prev.history, turn].slice(-50)
           // A final transcript means the pending image has been consumed by a
           // conversation turn — clear the indicator. The backend's own
           // "Image attached" confirmation must NOT clear it, or the flag would
@@ -121,7 +138,14 @@ export function useAnimState() {
         case 'error':
           return { ...prev, errorText: event.message, anim: 'idle' }
         case 'dashboard_open':
-          return { ...prev, dashboardOpen: !prev.dashboardOpen }
+          // Voice "open dashboard" now switches to the Dashboard tab.
+          return { ...prev, activeView: 'dashboard' }
+        case 'dashboard_data':
+          return { ...prev, dashboard: { memoryCount: event.memoryCount, entityCount: event.entityCount, sttEngine: event.sttEngine, uptimeSec: event.uptimeSec } }
+        case 'activity': {
+          const entry: ActivityEntry = { id: Date.now() + Math.random(), kind: event.kind, text: event.text, detail: event.detail, ts: event.ts }
+          return { ...prev, activity: [...prev.activity, entry].slice(-200) }
+        }
         case 'confirm_request':
           return { ...prev, confirm: { id: event.id, action: event.action, detail: event.detail } }
         case 'confirm_resolved':
@@ -166,7 +190,7 @@ export function useAnimState() {
         case 'quiet_mode_changed':
           return { ...prev, quietMode: event.enabled }
         case 'spotify_now_playing':
-          return { ...prev, spotifyNowPlaying: { track: event.track, artist: event.artist, isPlaying: event.isPlaying } }
+          return { ...prev, spotifyNowPlaying: { track: event.track, artist: event.artist, isPlaying: event.isPlaying, albumArt: event.albumArt } }
         case 'github_data':
           return { ...prev, githubData: { tab: event.tab, rows: event.rows } }
         case 'plan_preview':
@@ -187,6 +211,7 @@ export function useAnimState() {
     })
   }, [])
 
+  const setView = useCallback((view: ViewTab) => setState(prev => ({ ...prev, activeView: view })), [])
   const toggleDashboard = useCallback(() => setState(prev => ({ ...prev, dashboardOpen: !prev.dashboardOpen })), [])
   const toggleSettings = useCallback(() => setState(prev => ({ ...prev, settingsOpen: !prev.settingsOpen })), [])
   const clearError = useCallback(() => setState(prev => ({ ...prev, errorText: null })), [])
@@ -206,5 +231,5 @@ export function useAnimState() {
   const closeCapabilityModal = useCallback(() => setState(prev => ({ ...prev, capabilityMissing: null })), [])
   const dismissImprovementDone = useCallback(() => setState(prev => ({ ...prev, improvementDone: false })), [])
 
-  return { state, handleEvent, toggleDashboard, toggleSettings, clearError, closeCompose, closeViewer, openCompose, closeEvent, toggleTextVisible, toggleMemories, dismissToast, closeCommand, clearReport, setImageAttached, toggleSpotify, toggleGithub, closePlanPreview, closeCapabilityModal, dismissImprovementDone }
+  return { state, handleEvent, setView, toggleDashboard, toggleSettings, clearError, closeCompose, closeViewer, openCompose, closeEvent, toggleTextVisible, toggleMemories, dismissToast, closeCommand, clearReport, setImageAttached, toggleSpotify, toggleGithub, closePlanPreview, closeCapabilityModal, dismissImprovementDone }
 }

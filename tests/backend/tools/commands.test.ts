@@ -42,6 +42,21 @@ describe('custom commands', () => {
     expect(found?.target).toContain('test.exe')
   })
 
+  it('refuses to save a target with shell-breakout characters', async () => {
+    const { initDb } = await import('../../../src/backend/memory/db')
+    const { upsertCustomCommand, findCustomCommandByAlias } = await import('../../../src/backend/memory/customCommands')
+    initDb()
+    expect(() => upsertCustomCommand({
+      id: 'evil-1',
+      label: 'Evil',
+      aliases: ['evil'],
+      target: 'C:\\x" & calc & "y.exe',
+      kind: 'exe',
+    })).toThrow(/unsafe character/)
+    // Nothing should have been persisted.
+    expect(findCustomCommandByAlias('evil')).toBeNull()
+  })
+
   it('opens compose form when register is incomplete', async () => {
     const { initDb } = await import('../../../src/backend/memory/db')
     const { emitEvent } = await import('../../../src/backend/events')

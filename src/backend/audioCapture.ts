@@ -8,7 +8,7 @@
 // Avoids Chromium Web Audio (crashes with 0xC0000005 on Windows Electron) and
 // avoids native node-gyp builds (uses prebuilt @ffmpeg-installer/ffmpeg).
 
-import { spawn, type ChildProcessWithoutNullStreams } from 'child_process'
+import { spawn, spawnSync, type ChildProcessWithoutNullStreams } from 'child_process'
 
 export const WHISPER_SAMPLE_RATE = 16000
 const BYTES_PER_SAMPLE = 4
@@ -287,7 +287,18 @@ export function shutdownCapture(): void {
   }
   const proc = ffmpegProc
   ffmpegProc = null // 'close' handler treats null as already-handled, skips restart
-  try { proc?.kill() } catch { /* ignore */ }
+  if (!proc) return
+  const pid = proc.pid
+  try { proc.kill() } catch { /* ignore */ }
+  // On Windows, SIGTERM does NOT reliably stop an ffmpeg process reading from a
+  // dshow device — it keeps running, holds the mic open, and accumulates as a
+  // zombie across restarts. Force-kill the whole tree synchronously (spawnSync
+  // so it completes even when called from the process 'exit' hook).
+  if (process.platform === 'win32' && pid) {
+    try {
+      spawnSync('taskkill', ['/PID', String(pid), '/T', '/F'], { windowsHide: true, timeout: 2000 })
+    } catch { /* best effort */ }
+  }
 }
 
 process.on('exit', () => shutdownCapture())

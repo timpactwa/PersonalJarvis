@@ -148,7 +148,7 @@ describe('groq chat', () => {
     expect(typeof result.text).toBe('string')
   })
 
-  it('executes a tool call and broadcasts a → progress indicator', async () => {
+  it('executes a tool call and returns the final reply', async () => {
     // Tool call stream: name chunk + arguments chunk + finish chunk
     const toolChunks = [
       { choices: [{ index: 0, delta: { tool_calls: [{ index: 0, id: 'tc1', type: 'function', function: { name: 'app_launch', arguments: '' } }] }, finish_reason: null }] },
@@ -161,11 +161,14 @@ describe('groq chat', () => {
       { chunks: replyChunks, usage: replyUsage },
     ])
     const { chat } = await import('../../src/backend/groq')
+    const { handleTool } = await import('../../src/backend/tools/index')
     const events: BackendEvent[] = []
     const result = await chat('open spotify', [], [], e => events.push(e))
+    // Tool runs are surfaced in the Activity log (from handleTool), not echoed
+    // into the chat transcript — so the final reply is the only transcript text.
     expect(result.text).toBe('Spotify is now open.')
-    const progressBroadcast = events.find(e => e.type === 'transcript' && e.partial && e.text?.includes('→'))
-    expect(progressBroadcast).toBeDefined()
+    expect(handleTool).toHaveBeenCalledWith('app_launch', { name: 'spotify' }, expect.anything())
+    expect(events.find(e => e.type === 'transcript' && e.partial && e.text?.includes('→'))).toBeUndefined()
   })
 
   it('includes memory context strings in the system message', async () => {

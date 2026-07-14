@@ -19,10 +19,24 @@ function stripMarkdown(s: string): string {
 }
 
 export function Transcript({ history, streamingText, visible = true }: Props): JSX.Element {
-  const endRef = useRef<HTMLDivElement>(null)
+  const scrollRef = useRef<HTMLDivElement>(null)
+  // Only auto-scroll to the newest message when the user is already parked near
+  // the bottom. If they've scrolled up to read history, leave them there — the
+  // old unconditional scrollIntoView yanked the view down on every token and
+  // made the transcript feel un-scrollable.
+  const stickToBottom = useRef(true)
+
+  const onScroll = (): void => {
+    const el = scrollRef.current
+    if (!el) return
+    const distanceFromBottom = el.scrollHeight - el.scrollTop - el.clientHeight
+    stickToBottom.current = distanceFromBottom < 48
+  }
 
   useEffect(() => {
-    endRef.current?.scrollIntoView({ behavior: 'smooth' })
+    const el = scrollRef.current
+    if (!el || !stickToBottom.current) return
+    el.scrollTop = el.scrollHeight
   }, [history.length, streamingText])
 
   if (history.length === 0 && !streamingText) return <></>
@@ -48,18 +62,27 @@ export function Transcript({ history, streamingText, visible = true }: Props): J
       transform: 'translateX(-50%)',
       width: 'min(640px, 82vw)',
       maxHeight: '42vh',
-      overflowY: 'auto',
-      display: 'flex',
-      flexDirection: 'column',
-      gap: 7,
       pointerEvents: 'auto',
       cursor: 'default',
       zIndex: 10,
+      // Mask lives on the wrapper, not the scroller — applying it to the
+      // scrolling element interfered with wheel/drag scrolling.
       WebkitMaskImage: 'linear-gradient(to bottom, transparent 0%, black 16%, black 100%)',
       maskImage: 'linear-gradient(to bottom, transparent 0%, black 16%, black 100%)',
       opacity: visible ? 1 : 0,
       transition: 'opacity 0.35s ease',
     }}>
+      <div
+        ref={scrollRef}
+        onScroll={onScroll}
+        style={{
+          maxHeight: '42vh',
+          overflowY: 'auto',
+          display: 'flex',
+          flexDirection: 'column',
+          gap: 7,
+        }}
+      >
       {history.map(turn => (
         <div
           key={turn.id}
@@ -96,7 +119,7 @@ export function Transcript({ history, streamingText, visible = true }: Props): J
           </div>
         </div>
       )}
-      <div ref={endRef} />
+      </div>
     </div>
   )
 }

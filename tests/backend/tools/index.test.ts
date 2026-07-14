@@ -78,6 +78,18 @@ vi.mock('../../../src/backend/events', () => ({
   emitEvent: vi.fn(),
 }))
 
+// The destructive-tool gate (fs_write / execute_file) awaits user approval
+// inside handleTool before dispatch. Default the mock to "approved" so the
+// plain dispatch tests below pass straight through; the gate-specific tests
+// override the resolution per call.
+vi.mock('../../../src/backend/confirm', () => ({
+  awaitApproval: vi.fn(async () => true),
+}))
+
+vi.mock('../../../src/backend/turnManager', () => ({
+  setAwaitingApproval: vi.fn(),
+}))
+
 beforeEach(() => {
   vi.clearAllMocks()
 })
@@ -258,6 +270,74 @@ describe('handleTool preference tracking', () => {
     const { handleTool } = await import('../../../src/backend/tools/index')
     const result = await handleTool('fs_read', { path: 'file.txt' })
     expect(result).toBe('fs result')
+  })
+})
+
+describe('handleTool destructive gate', () => {
+  it('fs_write awaits approval before dispatching, arming the awaiting-approval flag', async () => {
+    const { awaitApproval } = await import('../../../src/backend/confirm')
+    const { setAwaitingApproval } = await import('../../../src/backend/turnManager')
+    const { handleFilesystemTool } = await import('../../../src/backend/tools/filesystem')
+    const { handleTool } = await import('../../../src/backend/tools/index')
+
+    const result = await handleTool('fs_write', { path: 'C:\\notes.txt', content: 'hi' })
+    expect(vi.mocked(awaitApproval)).toHaveBeenCalledWith('Write file', 'C:\\notes.txt', expect.anything())
+    expect(vi.mocked(setAwaitingApproval)).toHaveBeenNthCalledWith(1, true)
+    expect(vi.mocked(setAwaitingApproval)).toHaveBeenNthCalledWith(2, false)
+    expect(vi.mocked(handleFilesystemTool)).toHaveBeenCalled()
+    expect(result).toBe('fs result')
+  })
+
+  it('execute_file awaits approval and returns the real handler output on approve', async () => {
+    const { awaitApproval } = await import('../../../src/backend/confirm')
+    const { handleExecuteTool } = await import('../../../src/backend/tools/execute')
+    const { handleTool } = await import('../../../src/backend/tools/index')
+
+    const result = await handleTool('execute_file', { path: 'C:\\demo.bat' })
+    expect(vi.mocked(awaitApproval)).toHaveBeenCalledWith('Run file', 'C:\\demo.bat', expect.anything())
+    expect(vi.mocked(handleExecuteTool)).toHaveBeenCalledTimes(1) // exactly one gate, one dispatch
+    expect(result).toBe('executed')
+  })
+
+  it('declined approval returns the decline string and never dispatches', async () => {
+    const { awaitApproval } = await import('../../../src/backend/confirm')
+    const { setAwaitingApproval } = await import('../../../src/backend/turnManager')
+    const { handleFilesystemTool } = await import('../../../src/backend/tools/filesystem')
+    const { handleTool } = await import('../../../src/backend/tools/index')
+
+    vi.mocked(awaitApproval).mockResolvedValueOnce(false)
+    const result = await handleTool('fs_write', { path: 'C:\\notes.txt', content: 'hi' })
+    expect(result).toBe('User declined this action — do not retry it. Acknowledge and move on.')
+    expect(vi.mocked(handleFilesystemTool)).not.toHaveBeenCalled()
+    // Flag still cleared on the decline path.
+    expect(vi.mocked(setAwaitingApproval)).toHaveBeenLastCalledWith(false)
+  })
+
+  it('threads the turn abort signal into awaitApproval', async () => {
+    const { awaitApproval } = await import('../../../src/backend/confirm')
+    const { handleTool } = await import('../../../src/backend/tools/index')
+
+    const controller = new AbortController()
+    await handleTool('fs_write', { path: 'C:\\a.txt', content: 'x' }, { signal: controller.signal })
+    expect(vi.mocked(awaitApproval)).toHaveBeenCalledWith('Write file', 'C:\\a.txt', { signal: controller.signal })
+  })
+
+  it('non-destructive tools are not gated', async () => {
+    const { awaitApproval } = await import('../../../src/backend/confirm')
+    const { handleTool } = await import('../../../src/backend/tools/index')
+
+    await handleTool('fs_read', { path: 'file.txt' })
+    await handleTool('web_search', { query: 'weather' })
+    expect(vi.mocked(awaitApproval)).not.toHaveBeenCalled()
+  })
+
+  it('gmail_compose and calendar_create are not gated (editor UIs are the consent)', async () => {
+    const { awaitApproval } = await import('../../../src/backend/confirm')
+    const { handleTool } = await import('../../../src/backend/tools/index')
+
+    await handleTool('gmail_compose', {}, { userText: 'send an email to bob' })
+    await handleTool('calendar_create', {})
+    expect(vi.mocked(awaitApproval)).not.toHaveBeenCalled()
   })
 })
 

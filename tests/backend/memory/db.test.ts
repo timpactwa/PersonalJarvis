@@ -38,6 +38,21 @@ describe('database', () => {
     expect(rows[0].embedding.length).toBe(3)
   })
 
+  it('round-trips an embedding that is a VIEW into a larger buffer (byteOffset)', async () => {
+    const { initDb, insertMemory, getAllMemories } = await import('../../../src/backend/memory/db')
+    initDb()
+    // transformers.js often returns a subarray view into a pooled buffer. A naive
+    // Buffer.from(embedding.buffer) would serialize the whole pool and corrupt recall.
+    const pool = new Float32Array([9, 9, 9, 9, 0.5, 0.25, 0.125, 8, 8])
+    const view = pool.subarray(4, 7) // [0.5, 0.25, 0.125], non-zero byteOffset
+    expect(view.byteOffset).toBeGreaterThan(0)
+    insertMemory('viewed embedding', view)
+    const rows = getAllMemories()
+    expect(rows).toHaveLength(1)
+    expect(rows[0].embedding.length).toBe(3)
+    expect(Array.from(rows[0].embedding)).toEqual([0.5, 0.25, 0.125])
+  })
+
   it('returns id and timestamp from getAllMemories', async () => {
     const { initDb, insertMemory, getAllMemories } = await import('../../../src/backend/memory/db')
     initDb()
@@ -167,15 +182,27 @@ describe('entity storage', () => {
     expect(entities[0].relationship).toBe('girlfriend')
   })
 
-  it('upsertEntity updates an existing entity on second call', async () => {
+  it('upsertEntity merges context and keeps email on update', async () => {
     const { initDb, upsertEntity, getAllEntities } = await import('../../../src/backend/memory/db')
     initDb()
-    upsertEntity('Amanda', 'person', 'girlfriend', 'biology at Virginia Tech', [])
+    upsertEntity('Amanda', 'person', 'girlfriend', 'biology at Virginia Tech', [], 'amanda@vt.edu')
     upsertEntity('Amanda', 'person', 'girlfriend', 'graduated from Virginia Tech', ['Mandy'])
     const entities = getAllEntities()
     expect(entities).toHaveLength(1)
-    expect(entities[0].context).toBe('graduated from Virginia Tech')
+    expect(entities[0].context).toContain('biology at Virginia Tech')
+    expect(entities[0].context).toContain('graduated from Virginia Tech')
+    expect(entities[0].email).toBe('amanda@vt.edu')
     expect(entities[0].aliases).toContain('Mandy')
+  })
+
+  it('upsertEntity does not overwrite substantive context with vague email tags', async () => {
+    const { initDb, upsertEntity, getAllEntities } = await import('../../../src/backend/memory/db')
+    initDb()
+    upsertEntity('Mom', 'person', 'mother', 'introduced to Jarvis', ['mom'])
+    upsertEntity('mom', 'person', 'mother of Tim', 'email recipient', [])
+    const entities = getAllEntities()
+    expect(entities).toHaveLength(1)
+    expect(entities[0].context).toBe('introduced to Jarvis')
   })
 
   it('stores place entities correctly', async () => {

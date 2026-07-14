@@ -4,7 +4,6 @@ import { stripResponseTags, visibleStreamingText } from './responseTags'
 import { getTools, handleTool } from './tools/index'
 import { getSettings } from './memory/settings'
 import { PROFILE_AND_MEMORY_NOTE } from './prompt'
-import { isDestructiveChain, requestPlanPreview } from './planPreview'
 
 // Note: 'open' is intentionally excluded — it matches too broadly (e.g. "open
 // vs code" is conversational), while concrete launch intents are captured by
@@ -15,14 +14,14 @@ const TOOL_KEYWORDS = [
   'vscode', 'notepad', 'terminal', 'powershell', 'download', 'upload',
   // web search
   'web', 'internet', 'weather', 'news', 'research', 'google',
-  // additional tool triggers
-  'discord', 'code', 'run', 'execute',
+  // additional tool triggers ('run' handled by SMART_WORD_SIGNALS — word-boundary)
+  'discord', 'code', 'execute',
   // music playback control
   'playlist', 'pause', 'queue', 'volume', 'song', 'track',
   // calendar / scheduling / reminders
   'event', 'meeting', 'schedule', 'appointment', 'remind', 'reminder',
-  // github / source control
-  'github', 'pull request', 'issue', 'commit', 'repo',
+  // github / source control ('issue'/'commit'/'repo' → SMART_WORD_SIGNALS)
+  'github', 'pull request',
   // self-config / usage / screen
   'settings', 'usage', 'spending', 'screenshot',
 ]
@@ -46,9 +45,15 @@ const DEEP_MIN_WORDS = 12
 // against the user's natural-language utterance, so they must be words a person
 // actually says — not internal tool names.
 const SMART_SIGNALS = [
-  'email', 'gmail', 'github', 'pull request', 'issue', 'commit', 'repo',
-  'schedule', 'create event', 'add event', 'run', 'overwrite',
+  'email', 'gmail', 'github', 'pull request',
+  'schedule', 'create event', 'add event', 'overwrite',
 ]
+
+// Short signals that are substrings of common unrelated words must match on word
+// boundaries only — otherwise "report"→repo, "tissue"→issue, "brunch"→run and
+// "commitment"→commit silently mis-route plain conversation to the pricier Smart
+// tier. Plurals (issues/commits/repos/runs) are kept as Smart via the `s?`.
+const SMART_WORD_SIGNALS = /\b(runs?|issues?|repos?|commits?)\b/
 
 // How many tool-use steps a chain may consume before escalating to Deep.
 export const ESCALATION_STEP = 4
@@ -81,12 +86,13 @@ export function selectModel(text: string, forceModel?: string, stepCount?: numbe
   }
 
   // 6. Smart tier — email, GitHub, multi-step tool surfaces ("PRs" via word boundary)
-  if (SMART_SIGNALS.some(s => lower.includes(s)) || /\bprs?\b/.test(lower)) {
+  if (SMART_SIGNALS.some(s => lower.includes(s)) || SMART_WORD_SIGNALS.test(lower) || /\bprs?\b/.test(lower)) {
     return MODEL_SMART
   }
 
-  // 7. Fast tier — short conversational, no tool keywords
-  const hasToolKeyword = TOOL_KEYWORDS.some(kw => lower.includes(kw))
+  // 7. Fast tier — short conversational, no tool keywords. The word-boundary
+  // signals are folded in so "brunch"/"tissue"/"report" don't count as tools.
+  const hasToolKeyword = TOOL_KEYWORDS.some(kw => lower.includes(kw)) || SMART_WORD_SIGNALS.test(lower)
   if (words.length <= 15 && !hasToolKeyword) return MODEL_FAST
 
   // 8. Fast tier — single quick tool actions (launch / spotify / simple search)
@@ -202,9 +208,16 @@ export interface ChatResult {
   outputTokens: number
   pendingMemory: string | null
   pendingEntities: PendingEntity[]
+  pendingReport: { format: 'html' | 'md'; content: string } | null
 }
 
 const MAX_STEPS = 12
+
+// Normalizes an aborted upstream signal into an Error with name === 'AbortError'
+// so callers can distinguish cancellation from provider failures/timeouts.
+function toAbortError(signal: AbortSignal): Error {
+  return signal.reason instanceof Error ? signal.reason : new DOMException('cancelled', 'AbortError')
+}
 
 // Lazily initialised so dotenv has run before we read the env vars
 let _client: Anthropic | null = null
@@ -236,6 +249,7 @@ export async function chat(
   imageBase64?: string,
   imageMimeType?: string,
   forceModel?: string,
+  signal?: AbortSignal,
 ): Promise<ChatResult> {
   const client = getClient()
   // selectModel handles the forceModel override internally (it always wins)
@@ -265,6 +279,8 @@ export async function chat(
   let outputTokens = 0
 
   for (let step = 0; step < MAX_STEPS; step++) {
+    if (signal?.aborted) throw toAbortError(signal)
+
     // Tier escalation: once a chain has consumed ≥4 tool-use steps the task is
     // clearly complex — re-select with the step count so Deep tier takes over.
     // No-op when forceModel or a settings preference is in effect.
@@ -276,58 +292,62 @@ export async function chat(
       }
     }
 
-    const stream = client.messages.stream({
-      model,
-      max_tokens: 1024,
-      system: SYSTEM_PROMPT + memoryContext,
-      messages,
-      tools: getTools(),
-    })
-
     let stepText = ''
-    for await (const chunk of stream) {
-      if (chunk.type === 'content_block_delta' && chunk.delta.type === 'text_delta') {
-        stepText += chunk.delta.text
-        broadcast({ type: 'transcript', role: 'assistant', text: visibleStreamingText(stepText), partial: true })
-      }
-      if (chunk.type === 'message_start') inputTokens += chunk.message.usage.input_tokens
-      if (chunk.type === 'message_delta') outputTokens += chunk.usage.output_tokens
-    }
+    // `message_delta.usage.output_tokens` is the message's *cumulative* output
+    // count, so take the latest value per step (not +=, which over-counts when
+    // more than one delta arrives) and sum across tool-loop steps below.
+    let stepOutputTokens = 0
+    let finalMsg: Anthropic.Message
+    try {
+      const stream = client.messages.stream({
+        model,
+        max_tokens: 4096,
+        system: SYSTEM_PROMPT + memoryContext,
+        messages,
+        tools: getTools(),
+      }, { signal })
 
-    const finalMsg = await stream.finalMessage()
+      for await (const chunk of stream) {
+        if (chunk.type === 'content_block_delta' && chunk.delta.type === 'text_delta') {
+          stepText += chunk.delta.text
+          broadcast({ type: 'transcript', role: 'assistant', text: visibleStreamingText(stepText), partial: true })
+        }
+        if (chunk.type === 'message_start') inputTokens += chunk.message.usage.input_tokens
+        if (chunk.type === 'message_delta') stepOutputTokens = chunk.usage.output_tokens
+      }
+
+      finalMsg = await stream.finalMessage()
+    } catch (err) {
+      if (signal?.aborted) throw toAbortError(signal)
+      throw err
+    }
+    outputTokens += stepOutputTokens
 
     if (finalMsg.stop_reason !== 'tool_use') {
       fullText = stepText
       break
     }
 
-    // Show which tools are running — visible via streamingText in the renderer
+    // Tool runs are surfaced in the Activity log (emitted from handleTool), not
+    // injected into the chat transcript — the chat stays conversational.
     const toolBlocks = finalMsg.content.filter(
       (b): b is Anthropic.ToolUseBlock => b.type === 'tool_use',
     )
-    const toolLabel = toolBlocks.map(b => b.name.replace(/_/g, ' ')).join(', ')
-    broadcast({ type: 'transcript', role: 'assistant', text: `→ ${toolLabel}…`, partial: true })
 
     messages.push({ role: 'assistant', content: finalMsg.content })
 
-    // Plan preview gate — ask user before executing destructive tools
-    if (isDestructiveChain(toolBlocks.map(b => b.name))) {
-      const planId = `plan_${Date.now()}`
-      const steps = toolBlocks.map(b => `${b.name.replace(/_/g, ' ')}: ${JSON.stringify(b.input).slice(0, 80)}`)
-      const confirmed = await requestPlanPreview(planId, steps)
-      if (!confirmed) {
-        fullText = 'Cancelled — no changes were made.'
-        broadcast({ type: 'transcript', role: 'assistant', text: fullText, partial: false })
-        break
-      }
-    }
-
+    // Destructive-tool confirmation now happens INSIDE handleTool (the shared
+    // gate in tools/index.ts) — it awaits the user's real answer and returns
+    // the outcome as the tool result below, so the model sees it in this same
+    // turn instead of a second, disconnected confirmation.
     const toolResults: Anthropic.ToolResultBlockParam[] = await Promise.all(
       toolBlocks.map(async (b) => {
         try {
-          const result = await handleTool(b.name, b.input as Record<string, unknown>, { userText })
+          const result = await handleTool(b.name, b.input as Record<string, unknown>, { userText, signal })
+          if (signal?.aborted) throw toAbortError(signal)
           return { type: 'tool_result' as const, tool_use_id: b.id, content: result }
         } catch (err) {
+          if (err instanceof Error && err.name === 'AbortError') throw err
           return { type: 'tool_result' as const, tool_use_id: b.id, content: `Error: ${String(err)}`, is_error: true }
         }
       }),
@@ -341,9 +361,9 @@ export async function chat(
     broadcast({ type: 'transcript', role: 'assistant', text: fullText, partial: false })
   }
 
-  const { text, pendingMemory, pendingEntities } = stripResponseTags(fullText)
+  const { text, pendingMemory, pendingEntities, pendingReport } = stripResponseTags(fullText)
   fullText = text
   broadcast({ type: 'transcript', role: 'assistant', text: fullText, partial: false })
 
-  return { text: fullText, model, inputTokens, outputTokens, pendingMemory, pendingEntities }
+  return { text: fullText, model, inputTokens, outputTokens, pendingMemory, pendingEntities, pendingReport }
 }

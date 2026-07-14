@@ -8,6 +8,9 @@ let embedder: any = null
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 let embedderPromise: Promise<any> | null = null
 
+const _embedCache = new Map<string, Float32Array>()
+const EMBED_CACHE_MAX = 200
+
 async function getEmbedder(): Promise<any> {
   if (embedder) return embedder
   if (!embedderPromise) {
@@ -26,9 +29,15 @@ async function getEmbedder(): Promise<any> {
 }
 
 export async function embed(text: string): Promise<Float32Array> {
+  if (_embedCache.has(text)) return _embedCache.get(text)!
   const model = await getEmbedder()
   const output = await (model as any)(text, { pooling: 'mean', normalize: true })
-  return output.data as Float32Array
+  const result = output.data as Float32Array
+  if (_embedCache.size >= EMBED_CACHE_MAX) {
+    _embedCache.delete(_embedCache.keys().next().value!)
+  }
+  _embedCache.set(text, result)
+  return result
 }
 
 function cosineSimilarity(a: Float32Array, b: Float32Array): number {

@@ -1,7 +1,5 @@
-import { google } from 'googleapis'
 import { readFileSync, writeFileSync, existsSync } from 'fs'
-
-type OAuth2Client = InstanceType<typeof google.auth.OAuth2>
+import { google, type OAuth2Client } from './googleClient'
 import { join } from 'path'
 import { createServer } from 'http'
 import { randomUUID } from 'crypto'
@@ -25,7 +23,7 @@ function getOAuth2Client(): OAuth2Client {
   }
   const creds = JSON.parse(readFileSync(CREDS_PATH, 'utf-8'))
   const { client_id, client_secret } = creds.installed ?? creds.web
-  return new google.auth.OAuth2(client_id, client_secret, 'http://localhost:3456')
+  return new (google().auth.OAuth2)(client_id, client_secret, 'http://localhost:3456')
 }
 
 let _auth: OAuth2Client | null = null
@@ -96,7 +94,7 @@ export async function getAuthorizedClient(): Promise<OAuth2Client> {
 
 export async function searchEmails(query: string, maxResults = 5): Promise<string> {
   const auth = await getAuthorizedClient()
-  const gmail = google.gmail({ version: 'v1', auth })
+  const gmail = google().gmail({ version: 'v1', auth })
 
   const list = await gmail.users.messages.list({ userId: 'me', q: query, maxResults })
   if (!list.data.messages?.length) return 'No messages found.'
@@ -121,7 +119,7 @@ export async function searchEmails(query: string, maxResults = 5): Promise<strin
 
 export async function readEmail(messageId: string): Promise<string> {
   const auth = await getAuthorizedClient()
-  const gmail = google.gmail({ version: 'v1', auth })
+  const gmail = google().gmail({ version: 'v1', auth })
   const msg = await gmail.users.messages.get({ userId: 'me', id: messageId, format: 'full' })
   return extractPlainBody(msg.data.payload, msg.data.snippet).slice(0, 5000)
 }
@@ -159,7 +157,7 @@ function buildRawMessage(to: string, subject: string, body: string, cc = '', bcc
 
 export async function sendEmailNow(to: string, subject: string, body: string, cc = '', bcc = ''): Promise<string> {
   const auth = await getAuthorizedClient()
-  const gmail = google.gmail({ version: 'v1', auth })
+  const gmail = google().gmail({ version: 'v1', auth })
   await gmail.users.messages.send({ userId: 'me', requestBody: { raw: buildRawMessage(to, subject, body, cc, bcc) } })
   return `Email sent to ${to}.`
 }
@@ -167,7 +165,7 @@ export async function sendEmailNow(to: string, subject: string, body: string, cc
 export async function createDraft(to: string, subject: string, body: string, cc = '', bcc = ''): Promise<string> {
   if (!to) throw new Error('Recipient (to) is required')
   const auth = await getAuthorizedClient()
-  const gmail = google.gmail({ version: 'v1', auth })
+  const gmail = google().gmail({ version: 'v1', auth })
   await gmail.users.drafts.create({ userId: 'me', requestBody: { message: { raw: buildRawMessage(to, subject, body, cc, bcc) } } })
   return `Draft saved for ${to}.`
 }
@@ -187,7 +185,7 @@ export async function composeEmail(to: string, subject: string, body: string, cc
 
 export async function browseEmails(query: string, maxResults = 5): Promise<string> {
   const auth = await getAuthorizedClient()
-  const gmail = google.gmail({ version: 'v1', auth })
+  const gmail = google().gmail({ version: 'v1', auth })
   const list = await gmail.users.messages.list({ userId: 'me', q: query, maxResults })
   if (!list.data.messages?.length) {
     emitEvent({ type: 'email_view', emails: [] })
@@ -217,7 +215,7 @@ const LOCAL_TZ = Intl.DateTimeFormat().resolvedOptions().timeZone
 
 export async function listCalendarEvents(maxResults = 10): Promise<string> {
   const auth = await getAuthorizedClient()
-  const calendar = google.calendar({ version: 'v3', auth })
+  const calendar = google().calendar({ version: 'v3', auth })
   const res = await calendar.events.list({
     calendarId: 'primary',
     timeMin: new Date().toISOString(),
@@ -240,7 +238,7 @@ export async function createCalendarEvent(
   description = '',
 ): Promise<string> {
   const auth = await getAuthorizedClient()
-  const calendar = google.calendar({ version: 'v3', auth })
+  const calendar = google().calendar({ version: 'v3', auth })
   await calendar.events.insert({
     calendarId: 'primary',
     requestBody: {

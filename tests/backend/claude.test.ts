@@ -68,6 +68,22 @@ describe('selectModel — auto mode', () => {
     expect(selectModel('execute the file')).toBe(SONNET)
   })
 
+  it('does NOT mis-route conversational text whose words merely contain a smart signal', () => {
+    // "brunch"⊃run, "tissue"⊃issue, "report"⊃repo, "commitment"⊃commit — all
+    // previously forced the pricier Smart tier via naive substring matching.
+    expect(selectModel("let's grab brunch tomorrow")).not.toBe(SONNET)
+    expect(selectModel('can you hand me a tissue')).not.toBe(SONNET)
+    expect(selectModel('give me a weather report')).not.toBe(SONNET)
+    expect(selectModel('I admire your commitment')).not.toBe(SONNET)
+  })
+
+  it('still routes the real smart signals (incl. plurals) to Sonnet', () => {
+    expect(selectModel('show the latest commit')).toBe(SONNET)
+    expect(selectModel('list the open issues')).toBe(SONNET)
+    expect(selectModel('check the repo status')).toBe(SONNET)
+    expect(selectModel('run the deploy')).toBe(SONNET)
+  })
+
   // ── Deep tier ──────────────────────────────────────────────
   it('routes spawn_agent-style research requests to Fable', () => {
     expect(selectModel('research the top 5 javascript frameworks and compare their performance benchmarks in detail')).toBe(FABLE)

@@ -29,7 +29,7 @@ export async function synthesize(text: string): Promise<Buffer> {
         text,
         model_id: 'eleven_turbo_v2_5',
         voice_settings: { stability: 0.4, similarity_boost: 0.85 },
-        speed: 1.8,
+        speed: 2.5,
       }),
     }
   )

@@ -1,5 +1,5 @@
 import { getAuthorizedClient } from '../tools/gmail'
-import { google } from 'googleapis'
+import { google } from '../tools/googleClient'
 import { getSettings } from '../memory/settings'
 import type { Alert, EnqueueFn, RegisterFn } from './index'
 
@@ -44,7 +44,7 @@ export function startEmailMonitor(enqueue: EnqueueFn, register: RegisterFn): voi
     if (!getSettings().monitorEmail) return
     try {
       const auth = await getAuthorizedClient()
-      const gmail = google.gmail({ version: 'v1', auth })
+      const gmail = google().gmail({ version: 'v1', auth })
       const list = await gmail.users.messages.list({
         userId: 'me',
         q: 'is:unread newer_than:4m -category:promotions -category:social',

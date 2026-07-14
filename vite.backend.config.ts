@@ -34,7 +34,11 @@ export default defineConfig({
         '@anthropic-ai/sdk',
         '@anthropic-ai/claude-agent-sdk',
         '@xenova/transformers',
-        'googleapis',
+        // Match `googleapis` and its per-API subpaths (e.g.
+        // `googleapis/build/src/apis/gmail`) so they stay external rather than
+        // getting bundled. googleClient.ts loads only the gmail/calendar
+        // subpaths to avoid the slow meta-package.
+        /^googleapis(\/|$)/,
         'google-auth-library',
         '@ffmpeg-installer/ffmpeg',
       ],

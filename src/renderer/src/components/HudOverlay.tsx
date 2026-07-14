@@ -30,7 +30,6 @@ interface Props {
   model: string
   llmProvider?: LlmProvider
   onProviderChange?: (provider: LlmProvider) => void
-  onStatsClick?: () => void
   textVisible?: boolean
   onToggleText?: () => void
   spotifyOpen?: boolean
@@ -41,7 +40,7 @@ interface Props {
   onToggleQuietMode?: () => void
 }
 
-export function HudOverlay({ animState, tokensToday, costToday, model, llmProvider = 'auto', onProviderChange, onStatsClick, textVisible = true, onToggleText, spotifyOpen, githubOpen, quietMode, onToggleSpotify, onToggleGithub, onToggleQuietMode }: Props): JSX.Element {
+export function HudOverlay({ animState, tokensToday, costToday, model, llmProvider = 'auto', onProviderChange, textVisible = true, onToggleText, spotifyOpen, githubOpen, quietMode, onToggleSpotify, onToggleGithub, onToggleQuietMode }: Props): JSX.Element {
   const cycleProvider = (): void => {
     if (!onProviderChange) return
     const idx = PROVIDER_CYCLE.indexOf(llmProvider)
@@ -113,12 +112,6 @@ export function HudOverlay({ animState, tokensToday, costToday, model, llmProvid
         }}
       >
         <div style={{ display: 'flex', gap: 5 }}>
-          <button
-            onClick={onStatsClick}
-            className="pill-btn"
-          >
-            DASHBOARD
-          </button>
           <button
             onClick={onToggleText}
             title={textVisible ? 'Hide transcript' : 'Show transcript'}
