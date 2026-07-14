@@ -34,6 +34,17 @@ export function consolidateOnce(threshold = DEDUP_THRESHOLD): { merged: number }
       indexMemory(keeper)
       removed.add(loser.id)
       merged++
+
+      // If rows[i] itself was the loser (a later, higher-salience row won),
+      // rows[i] is now deleted — stop comparing it against the rest of the
+      // sweep. Continuing would compare a stale/deleted row against
+      // subsequent rows, which can silently no-op the merge (mergeMemory on
+      // a dead id), permanently drop a not-yet-merged row's content
+      // (deleteMemory on a row that was never folded anywhere), and
+      // resurrect a phantom index entry for a row that no longer exists in
+      // the db (indexMemory re-adding the stale `a` object). The outer
+      // loop's removed-check on the next `i` picks up cleanly from here.
+      if (loser === a) break
     }
   }
   return { merged }
